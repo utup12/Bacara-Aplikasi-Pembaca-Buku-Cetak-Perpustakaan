@@ -128,11 +128,6 @@
             border-color: #68b6ff;
         }
 
-        .scan-action {
-            width: 100%;
-            margin-top: 12px;
-        }
-
         button {
             appearance: none;
             border: 2px solid var(--hijau);
@@ -235,12 +230,13 @@
         }
 
         .speak-dock button {
+            min-width: 0;
             min-height: 64px;
+            flex: 1 1 0;
             box-shadow: 0 4px 16px rgba(7, 55, 47, .28);
         }
 
         .speak-dock .primary {
-            min-width: 0;
             flex: 1;
             font-size: 1.15rem;
         }
@@ -276,12 +272,23 @@
         }
 
         @media (max-width: 760px) {
-            body { font-size: 17px; }
+            body {
+                padding-bottom: 124px;
+                font-size: 17px;
+            }
             .panel { padding: 16px; }
             main { padding: 10px 14px 40px; }
-            .speak-dock { width: calc(100% - 28px); }
-            .speak-dock .primary { min-width: 0; flex: 1; }
-            .speak-dock button { padding-inline: 12px; }
+            .speak-dock {
+                gap: 6px;
+                width: calc(100% - 20px);
+            }
+            .speak-dock .primary { font-size: .88rem; }
+            .speak-dock button {
+                min-height: 60px;
+                padding: 5px 3px;
+                font-size: .78rem;
+                line-height: 1.25;
+            }
         }
 
         @media (orientation: landscape) and (max-height: 600px) {
@@ -306,7 +313,6 @@
                     <div class="scan-guide" aria-hidden="true"></div>
                 </div>
                 <p class="small">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
-                <button class="scan-action" id="scan-now" type="button">Pindai halaman</button>
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
@@ -327,6 +333,7 @@
     <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
         <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
+        <button id="scan-now" type="button">Pindai halaman</button>
         <button id="hentikan-suara" type="button">Hentikan suara</button>
         <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
     </div>
