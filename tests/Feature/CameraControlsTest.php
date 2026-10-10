@@ -1,3 +1,4 @@
+
 <?php
 
 namespace Tests\Feature;
@@ -23,6 +24,7 @@ class CameraControlsTest extends TestCase
             ->assertSee('startRealtimeTextRecognition()', false)
             ->assertSee('const REALTIME_SCAN_DELAY = 300', false)
             ->assertSee('const MINIMUM_OCR_CONFIDENCE = 26', false)
+            ->assertSee('const OCR_START_TIMEOUT = 45000', false)
             ->assertSee('const VIDEO_OCR_TARGET_WIDTH = 2048', false)
             ->assertSee('function optimizeCameraForText', false)
             ->assertSee('function recognizeBookPage', false)
@@ -40,6 +42,8 @@ class CameraControlsTest extends TestCase
             ->assertSee('id="hold-text"', false)
             ->assertSee('Tahan teks</button>', false)
             ->assertSee('function attachDoubleActivation', false)
+            ->assertSee('function waitForOcrOperation', false)
+            ->assertSee('function reportOcrProgress', false)
             ->assertSee('photoCaptureInput.click();', false)
             ->assertSee('const MINIMUM_TEXT_LENGTH = 6', false)
             ->assertSee('gunakan headset agar suara lebih jelas', false)
