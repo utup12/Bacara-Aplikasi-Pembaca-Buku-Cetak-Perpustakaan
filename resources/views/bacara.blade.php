@@ -329,6 +329,7 @@
     </main>
 
     <canvas id="canvas" hidden></canvas>
+    <input id="photo-capture" type="file" accept="image/*" capture="environment" hidden>
 
     <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
@@ -343,6 +344,7 @@
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
+        const photoCaptureInput = document.getElementById('photo-capture');
         const cameraPreview = document.querySelector('.camera');
         const statusBox = document.getElementById('status');
         const textArea = document.getElementById('hasil-teks');
@@ -356,6 +358,7 @@
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
         const frameQualityCanvas = document.createElement('canvas');
+        const binaryCanvas = document.createElement('canvas');
 
         let stream = null;
         let cameraStarting = false;
@@ -384,7 +387,8 @@
         const REALTIME_SCAN_DELAY = 300;
         const MINIMUM_OCR_CONFIDENCE = 48;
         const MINIMUM_WORD_CONFIDENCE = 42;
-        const OCR_TARGET_WIDTH = 2048;
+        const VIDEO_OCR_TARGET_WIDTH = 2048;
+        const PHOTO_OCR_TARGET_WIDTH = 2560;
         const REQUIRED_STEADY_FRAME_SAMPLES = 3;
         const FRAME_CHANGE_THRESHOLD = 10;
         const MINIMUM_SHARPNESS = 18;
@@ -676,21 +680,29 @@
                 throw new Error('Ukuran video belum tersedia.');
             }
 
+            return renderOcrImage(
+                video,
+                video.videoWidth,
+                video.videoHeight,
+                VIDEO_OCR_TARGET_WIDTH,
+                estimateLightLevel()
+            );
+        }
+
+        function renderOcrImage(source, sourceImageWidth, sourceImageHeight, maxOcrWidth, lightLevel = null) {
             // Samakan area OCR dengan bingkai yang dilihat pengguna, bukan seluruh video.
             const insetX = 0.05;
             const insetY = 0.07;
-            const sourceX = Math.floor(video.videoWidth * insetX);
-            const sourceY = Math.floor(video.videoHeight * insetY);
-            const sourceWidth = Math.floor(video.videoWidth * (1 - (insetX * 2)));
-            const sourceHeight = Math.floor(video.videoHeight * (1 - (insetY * 2)));
-            const maxOcrWidth = OCR_TARGET_WIDTH;
+            const sourceX = Math.floor(sourceImageWidth * insetX);
+            const sourceY = Math.floor(sourceImageHeight * insetY);
+            const sourceWidth = Math.floor(sourceImageWidth * (1 - (insetX * 2)));
+            const sourceHeight = Math.floor(sourceImageHeight * (1 - (insetY * 2)));
             // Sedikit pembesaran membantu bila kamera hanya dapat menyediakan video HD.
             const scale = Math.min(1.5, maxOcrWidth / sourceWidth);
 
             canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
             canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
 
-            const lightLevel = estimateLightLevel();
             const context = canvas.getContext('2d', { willReadFrequently: true });
             context.imageSmoothingEnabled = true;
             context.imageSmoothingQuality = 'high';
@@ -698,7 +710,7 @@
                 ? 'grayscale(1) contrast(1.75) brightness(1.28)'
                 : 'grayscale(1) contrast(1.42) brightness(1.08)';
             context.drawImage(
-                video,
+                source,
                 sourceX,
                 sourceY,
                 sourceWidth,
@@ -712,6 +724,46 @@
             enhanceDocumentImage(context, canvas.width, canvas.height);
 
             return canvas;
+        }
+
+        async function renderPhotoFile(file) {
+            if (!file || !('createImageBitmap' in window)) {
+                throw new Error('Browser tidak dapat memproses foto resolusi penuh.');
+            }
+
+            const bitmap = await createImageBitmap(file);
+            try {
+                return renderOcrImage(bitmap, bitmap.width, bitmap.height, PHOTO_OCR_TARGET_WIDTH);
+            } finally {
+                bitmap.close?.();
+            }
+        }
+
+        async function takeHighResolutionPhoto() {
+            const track = getVideoTrack();
+            if (!track || !('ImageCapture' in window) || !('createImageBitmap' in window)) {
+                return null;
+            }
+
+            try {
+                const photo = await new ImageCapture(track).takePhoto();
+                return await renderPhotoFile(photo);
+            } catch (error) {
+                // Sebagian browser Android mendukung video kamera, tetapi tidak mendukung foto resolusi penuh.
+                console.info('Foto resolusi penuh tidak tersedia; memakai frame video.', error);
+                return null;
+            }
+        }
+
+        async function captureBestOcrFrame({ preferPhoto = false, photoFile = null } = {}) {
+            if (photoFile) return renderPhotoFile(photoFile);
+
+            if (preferPhoto) {
+                const photoFrame = await takeHighResolutionPhoto();
+                if (photoFrame) return photoFrame;
+            }
+
+            return captureFrame();
         }
 
         function clampByte(value) {
@@ -767,6 +819,69 @@
             }
 
             context.putImageData(imageData, 0, 0);
+        }
+
+        function createAdaptiveDocumentCanvas(source) {
+            const width = source.width;
+            const height = source.height;
+            const pixelCount = width * height;
+            const stride = width + 1;
+            const localWindowRadius = Math.max(12, Math.min(48, Math.round(Math.min(width, height) * 0.012)));
+
+            binaryCanvas.width = width;
+            binaryCanvas.height = height;
+
+            const context = binaryCanvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(source, 0, 0);
+            const imageData = context.getImageData(0, 0, width, height);
+            const { data } = imageData;
+            const grayscale = new Uint8Array(pixelCount);
+            const integral = new Uint32Array((width + 1) * (height + 1));
+
+            for (let y = 0; y < height; y += 1) {
+                let rowSum = 0;
+                const integralRow = (y + 1) * stride;
+                const previousIntegralRow = y * stride;
+
+                for (let x = 0; x < width; x += 1) {
+                    const pixel = (y * width) + x;
+                    const dataIndex = pixel * 4;
+                    const value = clampByte(
+                        (data[dataIndex] * 0.2126)
+                        + (data[dataIndex + 1] * 0.7152)
+                        + (data[dataIndex + 2] * 0.0722)
+                    );
+
+                    grayscale[pixel] = value;
+                    rowSum += value;
+                    integral[integralRow + x + 1] = integral[previousIntegralRow + x + 1] + rowSum;
+                }
+            }
+
+            for (let y = 0; y < height; y += 1) {
+                const top = Math.max(0, y - localWindowRadius);
+                const bottom = Math.min(height - 1, y + localWindowRadius);
+
+                for (let x = 0; x < width; x += 1) {
+                    const left = Math.max(0, x - localWindowRadius);
+                    const right = Math.min(width - 1, x + localWindowRadius);
+                    const total = integral[((bottom + 1) * stride) + right + 1]
+                        - integral[(top * stride) + right + 1]
+                        - integral[((bottom + 1) * stride) + left]
+                        + integral[(top * stride) + left];
+                    const localMean = total / ((right - left + 1) * (bottom - top + 1));
+                    const threshold = Math.max(40, localMean * 0.87);
+                    const value = grayscale[(y * width) + x] < threshold ? 0 : 255;
+                    const dataIndex = ((y * width) + x) * 4;
+
+                    data[dataIndex] = value;
+                    data[dataIndex + 1] = value;
+                    data[dataIndex + 2] = value;
+                }
+            }
+
+            context.putImageData(imageData, 0, 0);
+            return binaryCanvas;
         }
 
         function inspectFrameQuality() {
@@ -901,24 +1016,24 @@
                 && candidate.letterRatio >= 0.5;
         }
 
-        async function recognizeBookPage(ocrWorker) {
-            const frame = captureFrame();
+        async function recognizeBookPage(ocrWorker, frame, { thorough = false } = {}) {
             const paragraphResult = await ocrWorker.recognize(frame);
             const paragraphCandidate = createOcrCandidate(paragraphResult);
 
-            if (isUsefulOcrCandidate(paragraphCandidate)) {
+            if (!thorough && isUsefulOcrCandidate(paragraphCandidate)) {
                 return paragraphCandidate;
             }
 
-            // Mode blok tunggal cocok untuk paragraf buku; mode kolom dipakai
-            // hanya sebagai cadangan agar urutan kalimat tidak mudah berantakan.
-            await ocrWorker.setParameters({ tessedit_pageseg_mode: '4' });
-            const columnResult = await ocrWorker.recognize(frame);
+            // Fallback khusus dokumen berbayang: threshold lokal memutihkan kertas
+            // secara adaptif, lalu mode otomatis memisahkan blok teks halaman.
+            const adaptiveFrame = createAdaptiveDocumentCanvas(frame);
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
+            const documentResult = await ocrWorker.recognize(adaptiveFrame);
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
-            const columnCandidate = createOcrCandidate(columnResult);
+            const documentCandidate = createOcrCandidate(documentResult);
 
-            return columnCandidate.score > paragraphCandidate.score
-                ? columnCandidate
+            return documentCandidate.score > paragraphCandidate.score
+                ? documentCandidate
                 : paragraphCandidate;
         }
 
@@ -960,7 +1075,13 @@
                 && candidate.confidence >= lastDetectedConfidence - 1;
         }
 
-        async function scanPage({ force = false } = {}) {
+        async function scanPage({
+            force = false,
+            preferPhoto = false,
+            photoFile = null,
+            preparedFrame = null,
+            thorough = false
+        } = {}) {
             if (!stream || textHeld || scanning || video.readyState < 2) return;
 
             scanning = true;
@@ -969,7 +1090,10 @@
 
             try {
                 const ocrWorker = await getWorker();
-                const candidate = await recognizeBookPage(ocrWorker);
+                const frame = preparedFrame ?? await captureBestOcrFrame({ preferPhoto, photoFile });
+                const candidate = await recognizeBookPage(ocrWorker, frame, {
+                    thorough: thorough || preferPhoto || Boolean(photoFile)
+                });
 
                 if (!stream || textHeld || textEditedManually) return;
 
@@ -1169,7 +1293,22 @@
 
             resetFrameStability();
             lastAutoScanAt = Date.now();
-            await scanPage({ force: true });
+
+            if ('ImageCapture' in window) {
+                setStatus('Mengambil foto resolusi penuh untuk hasil teks terbaik.');
+                const photoFrame = await takeHighResolutionPhoto();
+
+                if (photoFrame) {
+                    setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
+                    await scanPage({ force: true, preparedFrame: photoFrame, thorough: true });
+                    return;
+                }
+            }
+
+            // Fallback Android: kamera bawaan sistem umumnya menghasilkan foto lebih tajam
+            // daripada frame video yang tersedia untuk browser.
+            photoCaptureInput.value = '';
+            photoCaptureInput.click();
         }
 
         function attachDoubleActivation(button, getAnnouncement, action) {
@@ -1195,7 +1334,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman dapat digunakan untuk memindai ulang secara manual. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman mengambil foto resolusi penuh untuk hasil terbaik. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
@@ -1214,7 +1353,7 @@
         );
         attachDoubleActivation(
             scanNowButton,
-            () => 'Tombol Pindai halaman. Ketuk cepat dua kali untuk mengambil teks dari halaman yang ada di dalam bingkai.',
+            () => 'Tombol Pindai halaman. Ketuk cepat dua kali untuk mengambil foto resolusi penuh dan membaca teks halaman dengan kualitas terbaik.',
             scanCurrentPage
         );
         attachDoubleActivation(
@@ -1242,6 +1381,18 @@
         textArea.addEventListener('input', () => {
             textEditedManually = true;
             setTextHeld(true);
+        });
+
+        photoCaptureInput.addEventListener('change', async () => {
+            const photoFile = photoCaptureInput.files?.[0];
+            photoCaptureInput.value = '';
+
+            if (!photoFile || textHeld || textEditedManually) return;
+
+            resetFrameStability();
+            lastAutoScanAt = Date.now();
+            setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
+            await scanPage({ force: true, photoFile });
         });
 
         window.addEventListener('pagehide', () => {
