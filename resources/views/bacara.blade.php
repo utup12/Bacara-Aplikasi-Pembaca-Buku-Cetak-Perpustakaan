@@ -332,7 +332,7 @@
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
                     <div class="scan-guide" aria-hidden="true"></div>
                 </div>
-                <p class="small" id="camera-instruction">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
+                <p class="small">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
@@ -400,12 +400,13 @@
         let torchAvailable = false;
         let torchEnabled = false;
         let isMeasuringLight = false;
+        let scanRequestPending = false;
         let previousFramePixels = null;
         let steadyFrameSamples = 0;
         let lastAutoScanAt = 0;
 
         const DARKNESS_THRESHOLD = 58;
-        const REALTIME_SCAN_DELAY = 300;
+        const REALTIME_SCAN_DELAY = 500;
         // Tesseract sering memberi confidence rendah untuk cetakan buku yang
         // kecil atau sedikit miring. Jangan membuang teks yang tetap berguna
         // hanya karena nilainya belum mendekati hasil dokumen digital.
@@ -416,13 +417,14 @@
         const OCR_START_TIMEOUT = 45000;
         const OCR_RECOGNITION_TIMEOUT = 45000;
         const VIDEO_OCR_TARGET_WIDTH = 2048;
-        const PHOTO_OCR_TARGET_WIDTH = 2560;
+        // Ukuran ini cukup tajam untuk cetakan buku, tetapi jauh lebih ringan
+        // daripada foto asli pada RAM dan CPU ponsel.
+        const PHOTO_OCR_TARGET_WIDTH = 1920;
         const REQUIRED_STEADY_FRAME_SAMPLES = 3;
         const FRAME_CHANGE_THRESHOLD = 10;
         const MINIMUM_SHARPNESS = 18;
         const AUTO_SCAN_COOLDOWN = 2400;
         const DOUBLE_ACTIVATION_DELAY = 450;
-        const CAMERA_FRAME_INSTRUCTION = 'Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.';
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
@@ -431,6 +433,16 @@
 
         function setCameraScanState(state) {
             cameraPreview.dataset.scanState = state;
+        }
+
+        function announceScanProgress(message, mode = 'info') {
+            setStatus(message, mode);
+            speakGuidance(message);
+        }
+
+        function setScanRequestPending(isPending) {
+            scanRequestPending = isPending;
+            refreshCameraToggleButton();
         }
 
         function resetFrameStability() {
@@ -506,7 +518,7 @@
             cameraToggleButton.textContent = cameraOn ? 'Matikan kamera' : 'Aktifkan kamera';
             cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
             cameraToggleButton.classList.toggle('warning', cameraOn);
-            scanNowButton.disabled = !cameraOn || cameraStarting || scanning || textHeld;
+            scanNowButton.disabled = !cameraOn || cameraStarting || scanning || scanRequestPending || textHeld;
         }
 
         function refreshTorchButton() {
@@ -545,9 +557,7 @@
                 await waitForCameraFrame();
                 await optimizeCameraForText();
                 setCameraScanState('waiting');
-                const cameraReadyMessage = `Kamera aktif. ${CAMERA_FRAME_INSTRUCTION}`;
-                setStatus(cameraReadyMessage);
-                speakGuidance(cameraReadyMessage);
+                setStatus('Kamera aktif. Masukkan satu halaman ke bingkai dan tahan perangkat tetap stabil.');
                 refreshCameraToggleButton();
                 startLightMonitor();
                 startRealtimeTextRecognition();
@@ -563,6 +573,7 @@
         function stopCamera() {
             stopRealtimeTextRecognition();
             stopLightMonitor();
+            scanRequestPending = false;
 
             if (stream) {
                 stream.getTracks().forEach((track) => track.stop());
@@ -1118,7 +1129,7 @@
                 && candidate.letterRatio >= 0.35;
         }
 
-        async function recognizeBookPage(ocrWorker, frame, { thorough = false } = {}) {
+        async function recognizeBookPage(ocrWorker, frame) {
             const paragraphResult = await waitForOcrOperation(
                 ocrWorker.recognize(frame),
                 OCR_RECOGNITION_TIMEOUT,
@@ -1126,7 +1137,9 @@
             );
             const paragraphCandidate = createOcrCandidate(paragraphResult);
 
-            if (!thorough && isUsefulOcrCandidate(paragraphCandidate)) {
+            // Satu kali OCR biasanya cukup untuk foto halaman yang baik. Threshold
+            // adaptif yang mahal hanya dipakai apabila hasil pertama memang buruk.
+            if (isUsefulOcrCandidate(paragraphCandidate)) {
                 return paragraphCandidate;
             }
 
@@ -1189,27 +1202,25 @@
             force = false,
             preferPhoto = false,
             photoFile = null,
-            preparedFrame = null,
-            thorough = false
+            preparedFrame = null
         } = {}) {
             if (!stream || textHeld || scanning || video.readyState < 2) return;
 
             scanning = true;
+            setScanRequestPending(false);
             refreshCameraToggleButton();
             setCameraScanState('reading');
 
             try {
                 const ocrWorker = await getWorker();
                 const frame = preparedFrame ?? await captureBestOcrFrame({ preferPhoto, photoFile });
-                const candidate = await recognizeBookPage(ocrWorker, frame, {
-                    thorough: thorough || preferPhoto || Boolean(photoFile)
-                });
+                const candidate = await recognizeBookPage(ocrWorker, frame);
 
                 if (!stream || textHeld || textEditedManually) return;
 
                 if (!isUsefulOcrCandidate(candidate)) {
                     if (lastRecognitionState !== 'unclear') {
-                        setStatus('Teks belum cukup jelas. Bersihkan lensa, luruskan halaman, lalu tahan kamera tetap stabil.', 'error');
+                        announceScanProgress('Teks belum terdeteksi. Pastikan halaman terang, lurus, dan stabil, lalu pindai lagi.', 'error');
                         lastRecognitionState = 'unclear';
                     }
                     return;
@@ -1228,7 +1239,7 @@
                 lastDetectedScore = candidate.score;
                 lastDetectedConfidence = candidate.confidence;
                 lastRecognitionState = 'detected';
-                setStatus('Teks diperbarui dari frame yang stabil dan tajam.', 'detected');
+                announceScanProgress('Halaman siap. Teks berhasil terdeteksi. Tekan dua kali tombol Bacakan teks untuk membacakan.', 'detected');
             } catch (error) {
                 console.error(error);
                 const message = error?.message || 'Deteksi teks tidak dapat dijalankan.';
@@ -1236,8 +1247,7 @@
                     worker?.terminate?.();
                     worker = null;
                 }
-                setStatus(`${message} Periksa koneksi internet, lalu coba pindai lagi.`, 'error');
-                stopRealtimeTextRecognition();
+                announceScanProgress(`${message} Periksa koneksi internet, lalu coba pindai lagi.`, 'error');
             } finally {
                 scanning = false;
                 setCameraScanState(stream ? 'ready' : 'waiting');
@@ -1284,14 +1294,14 @@
             steadyFrameSamples += 1;
             setCameraScanState(steadyFrameSamples >= REQUIRED_STEADY_FRAME_SAMPLES ? 'ready' : 'steady');
 
-            if (steadyFrameSamples < REQUIRED_STEADY_FRAME_SAMPLES
-                || Date.now() - lastAutoScanAt < AUTO_SCAN_COOLDOWN
-                || textEditedManually) {
+            if (steadyFrameSamples < REQUIRED_STEADY_FRAME_SAMPLES || textEditedManually) {
                 return;
             }
 
-            lastAutoScanAt = Date.now();
-            await scanPage();
+            if (lastRecognitionState !== 'ready') {
+                setStatus('Halaman siap dipindai. Ketuk dua kali tombol Pindai halaman.');
+                lastRecognitionState = 'ready';
+            }
         }
 
         function makeTextSpeakable(text) {
@@ -1368,7 +1378,7 @@
             lastDetectedConfidence = 0;
             lastRecognitionState = '';
             textEditedManually = false;
-            setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui secara berkelanjutan.');
+            setStatus('Pemindaian halaman dilanjutkan. Ketuk dua kali tombol Pindai halaman saat halaman siap.');
             startRealtimeTextRecognition();
         }
 
@@ -1397,21 +1407,33 @@
             textEditedManually = false;
             setStatus(textHeld
                 ? 'Hasil teks dikosongkan dan tetap ditahan.'
-                : 'Hasil teks dikosongkan. Deteksi real-time tetap berjalan.');
+                : 'Hasil teks dikosongkan. Siapkan halaman lalu ketuk dua kali tombol Pindai halaman.');
         }
 
         async function scanCurrentPage() {
             if (textHeld || textEditedManually) {
-                setStatus('Lanjutkan atau refresh hasil teks terlebih dahulu sebelum memindai halaman baru.', 'error');
+                announceScanProgress('Lanjutkan atau refresh hasil teks terlebih dahulu sebelum memindai halaman baru.', 'error');
                 return;
             }
+
+            if (!stream || video.readyState < 2) {
+                announceScanProgress('Kamera belum siap. Tunggu sebentar lalu pindai lagi.', 'error');
+                return;
+            }
+
+            setScanRequestPending(true);
+            announceScanProgress('Memindai halaman.');
 
             // Jangan melakukan await sebelum membuka input file pada web biasa.
             // Browser Android dapat mencabut user activation setelah await, lalu
             // photoCaptureInput.click() tidak lagi diizinkan membuka kamera.
             const androidOcr = getAndroidOcrPlugin();
             if (androidOcr) {
-                await scanWithAndroidOcr(androidOcr);
+                try {
+                    await scanWithAndroidOcr(androidOcr);
+                } finally {
+                    setScanRequestPending(false);
+                }
                 return;
             }
 
@@ -1426,20 +1448,26 @@
                 return;
             }
 
-            setStatus('Mengambil foto resolusi penuh untuk hasil teks terbaik.');
-            const photoFrame = await takeHighResolutionPhoto();
+            try {
+                const photoFrame = await takeHighResolutionPhoto();
 
-            if (photoFrame) {
-                setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
-                await scanPage({ force: true, preparedFrame: photoFrame, thorough: true });
-                return;
+                if (photoFrame) {
+                    announceScanProgress('Halaman terdeteksi. Memproses halaman baru.');
+                    await scanPage({ force: true, preparedFrame: photoFrame });
+                    return;
+                }
+
+                // Jangan kembali ke input file di sini: operasi asinkron di atas
+                // sudah dapat membuat browser menolak pembukaan kamera. Gunakan
+                // frame video yang aktif sebagai fallback yang selalu tersedia.
+                announceScanProgress('Halaman terdeteksi. Memproses halaman baru.');
+                await scanPage({ force: true });
+            } catch (error) {
+                console.error(error);
+                announceScanProgress('Halaman tidak dapat dipindai. Pastikan kamera tetap aktif lalu coba lagi.', 'error');
+            } finally {
+                if (!scanning) setScanRequestPending(false);
             }
-
-            // Jangan kembali ke input file di sini: operasi asinkron di atas
-            // sudah dapat membuat browser menolak pembukaan kamera. Gunakan
-            // frame video yang aktif sebagai fallback yang selalu tersedia.
-            setStatus('Foto resolusi penuh tidak tersedia. Memproses frame kamera.');
-            await scanPage({ force: true, thorough: true });
         }
 
         function getAndroidOcrPlugin() {
@@ -1578,12 +1606,18 @@
         photoCaptureInput.addEventListener('change', async () => {
             const photoFile = photoCaptureInput.files?.[0];
             photoCaptureInput.value = '';
+            setScanRequestPending(false);
 
-            if (!photoFile || textHeld || textEditedManually) return;
+            if (!photoFile) {
+                setStatus('Pengambilan foto dibatalkan.');
+                return;
+            }
+
+            if (textHeld || textEditedManually) return;
 
             resetFrameStability();
             lastAutoScanAt = Date.now();
-            setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
+            announceScanProgress('Halaman terdeteksi. Memproses halaman baru.');
             await scanPage({ force: true, photoFile });
         });
 
