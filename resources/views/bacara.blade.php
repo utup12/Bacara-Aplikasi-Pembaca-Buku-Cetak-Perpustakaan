@@ -319,7 +319,7 @@
         let isMeasuringLight = false;
 
         const DARKNESS_THRESHOLD = 58;
-        const REALTIME_SCAN_DELAY = 5000;
+        const REALTIME_SCAN_DELAY = 200;
         const MINIMUM_OCR_CONFIDENCE = 18;
         const OCR_TARGET_WIDTH = 1920;
         const DOUBLE_ACTIVATION_DELAY = 450;
@@ -330,9 +330,44 @@
         }
 
         function getIndonesianVoice() {
-            return window.speechSynthesis
-                .getVoices()
-                .find((voice) => voice.lang.toLowerCase().startsWith('id'));
+            const voices = window.speechSynthesis.getVoices();
+
+            return voices.find((voice) => voice.lang.toLowerCase() === 'id-id')
+                ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('id'));
+        }
+
+        function configureIndonesianVoice(utterance) {
+            const indonesianVoice = getIndonesianVoice();
+            utterance.lang = indonesianVoice?.lang ?? 'id-ID';
+
+            if (indonesianVoice) {
+                utterance.voice = indonesianVoice;
+            }
+
+            return Boolean(indonesianVoice);
+        }
+
+        function waitForIndonesianVoice(timeout = 800) {
+            if (!('speechSynthesis' in window) || getIndonesianVoice()) {
+                return Promise.resolve();
+            }
+
+            return new Promise((resolve) => {
+                let finished = false;
+                const finish = () => {
+                    if (finished) return;
+
+                    finished = true;
+                    window.speechSynthesis.removeEventListener('voiceschanged', voicesChanged);
+                    resolve();
+                };
+                const voicesChanged = () => {
+                    if (getIndonesianVoice()) finish();
+                };
+
+                window.speechSynthesis.addEventListener('voiceschanged', voicesChanged);
+                window.setTimeout(finish, timeout);
+            });
         }
 
         function speakMessage(message) {
@@ -343,14 +378,7 @@
             window.speechSynthesis.cancel();
 
             const guidance = new SpeechSynthesisUtterance(message);
-            const indonesianVoice = getIndonesianVoice();
-
-            if (indonesianVoice) {
-                guidance.voice = indonesianVoice;
-                guidance.lang = indonesianVoice.lang;
-            } else {
-                guidance.lang = 'id-ID';
-            }
+            configureIndonesianVoice(guidance);
 
             guidance.rate = 1;
             window.speechSynthesis.cancel();
@@ -398,7 +426,7 @@
                 await video.play();
                 await waitForCameraFrame();
                 await optimizeCameraForText();
-                setStatus('Kamera aktif. Teks akan diperbarui setiap lima detik.');
+                setStatus('Kamera aktif. Teks diperbarui secara berkelanjutan.');
                 refreshCameraToggleButton();
                 startLightMonitor();
                 startRealtimeTextRecognition();
@@ -671,7 +699,7 @@
             if (!stream || realtimeRecognitionActive || textHeld) return;
 
             realtimeRecognitionActive = true;
-            scheduleRealtimeTextRecognition(500);
+            scheduleRealtimeTextRecognition(150);
         }
 
         function stopRealtimeTextRecognition() {
@@ -719,7 +747,7 @@
                     lastDetectedText = candidate.text;
                     lastDetectedScore = candidate.score;
                     lastRecognitionState = 'detected';
-                    setStatus('Teks diperbarui. Pemindaian berikutnya dilakukan dalam lima detik.', 'detected');
+                    setStatus('Teks diperbarui. Pemindaian terus berjalan.', 'detected');
                 } else if (candidate.text === lastDetectedText) {
                     lastDetectedScore = Math.max(lastDetectedScore, candidate.score);
                 }
@@ -764,14 +792,7 @@
             window.speechSynthesis.cancel();
 
             const speech = new SpeechSynthesisUtterance(makeTextSpeakable(text));
-            const indonesianVoice = getIndonesianVoice();
-
-            if (indonesianVoice) {
-                speech.voice = indonesianVoice;
-                speech.lang = indonesianVoice.lang;
-            } else {
-                speech.lang = 'id-ID';
-            }
+            configureIndonesianVoice(speech);
 
             speech.rate = Number(rate.value);
             speech.onstart = () => setStatus('Bacara sedang membacakan teks.');
@@ -812,7 +833,7 @@
             lastDetectedScore = 0;
             lastRecognitionState = '';
             textEditedManually = false;
-            setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui setiap lima detik.');
+            setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui secara berkelanjutan.');
             startRealtimeTextRecognition();
         }
 
@@ -861,11 +882,12 @@
             });
         }
 
-        function playInitialGuidance() {
+        async function playInitialGuidance() {
             if (initialGuidancePlayed) return;
 
             initialGuidancePlayed = true;
-            const guidance = 'Selamat datang di Bacara. Bersihkan lensa kamera, letakkan buku di tempat yang cukup terang, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Kamera akan membaca teks setiap lima detik. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            await waitForIndonesianVoice();
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan buku di tempat yang cukup terang, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Kamera akan membaca teks secara berkelanjutan. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }

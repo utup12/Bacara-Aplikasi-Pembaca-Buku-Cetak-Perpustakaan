@@ -21,11 +21,12 @@ class CameraControlsTest extends TestCase
             ->assertDontSee('id="auto-scan"', false)
             ->assertSee('tesseract.js', false)
             ->assertSee('startRealtimeTextRecognition()', false)
-            ->assertSee('const REALTIME_SCAN_DELAY = 5000', false)
+            ->assertSee('const REALTIME_SCAN_DELAY = 200', false)
             ->assertSee('const MINIMUM_OCR_CONFIDENCE = 18', false)
             ->assertSee('const OCR_TARGET_WIDTH = 1920', false)
             ->assertSee('function optimizeCameraForText', false)
-            ->assertSee('function recognizeBookPage', false);
+            ->assertSee('function recognizeBookPage', false)
+            ->assertSee('function configureIndonesianVoice', false);
     }
 
     public function test_camera_page_provides_hold_and_double_activation_controls(): void
@@ -39,6 +40,7 @@ class CameraControlsTest extends TestCase
             ->assertSee('id="hold-text"', false)
             ->assertSee('Tahan teks</button>', false)
             ->assertSee('function attachDoubleActivation', false)
+            ->assertSee('gunakan headset agar suara lebih jelas', false)
             ->assertSee('Ketuk sekali sebuah tombol untuk mendengar fungsinya.', false)
             ->assertSee('const DOUBLE_ACTIVATION_DELAY = 450', false)
             ->assertDontSee('textArea.focus()', false);
