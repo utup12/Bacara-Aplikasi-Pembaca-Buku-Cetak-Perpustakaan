@@ -23,8 +23,8 @@ Kemudian buka `http://127.0.0.1:8000`.
 
 - Kamera meminta resolusi hingga 2560×1440 jika perangkat mendukungnya.
 - Bingkai pemindaian membantu pengguna menempatkan satu halaman buku; OCR hanya membaca area tersebut.
-- Pemindaian otomatis menunggu tiga sampel frame yang stabil dan cukup tajam sebelum menjalankan OCR. Tombol **Pindai halaman** tersedia untuk memindai ulang secara manual.
-- Gambar dikonversi ke grayscale, dinormalisasi berdasarkan pencahayaan frame, dan diberi peningkatan kontras ringan sebelum dikirim ke OCR.
+- Pemindaian otomatis menunggu tiga sampel frame yang stabil dan cukup tajam sebelum menjalankan OCR. Tombol **Pindai halaman** memilih foto resolusi penuh bila browser Android mendukungnya; bila tidak, aplikasi membuka kamera bawaan untuk mengambil foto berkualitas lebih tinggi.
+- Gambar dikonversi ke grayscale, dinormalisasi berdasarkan pencahayaan frame, dan diberi peningkatan kontras ringan sebelum dikirim ke OCR. Untuk foto resolusi penuh, aplikasi juga membandingkan hasil dengan versi threshold adaptif yang membantu mengatasi bayangan pada kertas.
 - Hasil ber-confidence rendah tidak menggantikan teks yang sudah lebih baik, sehingga teks tidak mudah berubah menjadi hasil yang berantakan.
 
 ## Privasi
