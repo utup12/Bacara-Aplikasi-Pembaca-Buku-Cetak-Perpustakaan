@@ -331,6 +331,7 @@
     </main>
 
     <canvas id="canvas" hidden></canvas>
+    <input id="photo-capture" type="file" accept="image/*" capture="environment" hidden>
 
     <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
@@ -345,6 +346,7 @@
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
+        const photoCaptureInput = document.getElementById('photo-capture');
         const cameraPreview = document.querySelector('.camera');
         const statusBox = document.getElementById('status');
         const textArea = document.getElementById('hasil-teks');
@@ -398,10 +400,9 @@
         const OCR_START_TIMEOUT = 45000;
         const OCR_RECOGNITION_TIMEOUT = 45000;
         const VIDEO_OCR_TARGET_WIDTH = 2048;
-        const FAST_OCR_TARGET_WIDTH = 1280;
         // Ukuran ini cukup tajam untuk cetakan buku, tetapi jauh lebih ringan
         // daripada foto asli pada RAM dan CPU ponsel.
-        const PHOTO_OCR_TARGET_WIDTH = 1920;
+        const PHOTO_OCR_TARGET_WIDTH = 2400;
         const REQUIRED_STEADY_FRAME_SAMPLES = 3;
         const FRAME_CHANGE_THRESHOLD = 10;
         const MINIMUM_SHARPNESS = 18;
@@ -816,13 +817,13 @@
             }
         }
 
-        async function captureBestOcrFrame({ preferPhoto = false, fast = false } = {}) {
+        async function captureBestOcrFrame({ preferPhoto = false } = {}) {
             if (preferPhoto) {
                 const photoFrame = await takeHighResolutionPhoto();
                 if (photoFrame) return photoFrame;
             }
 
-            return captureFrame(fast ? FAST_OCR_TARGET_WIDTH : VIDEO_OCR_TARGET_WIDTH);
+            return captureFrame();
         }
 
         function clampByte(value) {
@@ -1057,7 +1058,7 @@
                     'Pembaca teks terlalu lama dimuat. Periksa koneksi internet lalu coba pindai lagi.'
                 ).then(async (createdWorker) => {
                     await createdWorker.setParameters({
-                        tessedit_pageseg_mode: '6',
+                        tessedit_pageseg_mode: '3',
                         preserve_interword_spaces: '0'
                     });
                     worker = createdWorker;
@@ -1085,16 +1086,10 @@
 
         function normalizeOcrText(rawText) {
             return rawText
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n')
-                // Satukan kata yang terpotong saat berganti baris dan baris
-                // paragraf biasa agar hasil lebih nyaman dibaca oleh suara.
-                .replace(/([A-Za-zÀ-ÿ])-\s*\n\s*([a-zà-ÿ])/g, '$1$2')
-                .replace(/([a-zà-ÿ,;:])\s*\n\s*([a-zà-ÿ])/g, '$1 $2')
-                .replace(/\s+([,.;:!?])/g, '$1')
-                .replace(/^([ \t]*)([\u2022\u25CF\u25CB\u25E6\u25AA\u25AB\u25A0\u25A1\u25C6\u25C7])\s*/gm, '$1\u2022 ')
-                .replace(/^([ \t]*)(\d+)\s*[\)\]]\s*/gm, '$1$2. ')
-                .replace(/^([ \t]*)([A-Za-z])\s*[\)\]]\s*/gm, '$1$2. ')
+                // Jangan menggabungkan, mengganti, atau "membetulkan" kata.
+                // Area hasil harus menjadi salinan langsung keluaran OCR agar
+                // pengguna dapat menilai dan menyalinnya apa adanya.
+                .replace(/\r\n/g, '\n')
                 .trim();
         }
 
@@ -1158,13 +1153,13 @@
             // Fallback khusus dokumen berbayang: threshold lokal memutihkan kertas
             // secara adaptif, lalu mode otomatis memisahkan blok teks halaman.
             const adaptiveFrame = createAdaptiveDocumentCanvas(frame);
-            await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
             const documentResult = await waitForOcrOperation(
                 ocrWorker.recognize(adaptiveFrame),
                 OCR_RECOGNITION_TIMEOUT,
                 'Pembacaan teks terlalu lama. Coba luruskan halaman atau pindai lagi.'
             );
-            await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
             const documentCandidate = createOcrCandidate(documentResult);
 
             return documentCandidate.score > paragraphCandidate.score
@@ -1213,8 +1208,7 @@
         async function scanPage({
             force = false,
             preferPhoto = false,
-            preparedFrame = null,
-            fast = false
+            preparedFrame = null
         } = {}) {
             if (!stream || textLocked || scanning || video.readyState < 2) return;
 
@@ -1227,31 +1221,9 @@
                 // Tangkap frame terlebih dahulu. Pengguna mendapat hasil dari
                 // halaman yang sedang terlihat, bukan dari halaman yang mungkin
                 // sudah berubah saat model OCR selesai disiapkan.
-                const frame = preparedFrame ?? await captureBestOcrFrame({ preferPhoto, fast });
-                if (fast) {
-                    announceScanProgress('Halaman terdeteksi. Memproses halaman baru.');
-                }
+                const frame = preparedFrame ?? await captureBestOcrFrame({ preferPhoto });
                 const ocrWorker = await getWorker();
-                let candidate = await recognizeBookPage(ocrWorker, frame, { allowAdaptive: !fast });
-
-                // Mode cepat mengutamakan respons. Bila teks belum layak,
-                // lakukan satu percobaan rinci saja—tanpa OCR berulang.
-                if (fast && !isUsefulOcrCandidate(candidate)) {
-                    announceScanProgress('Teks perlu diperjelas. Memproses ulang dengan kualitas lebih tinggi.');
-                    const detailedFrame = captureFrame();
-                    candidate = await recognizeBookPage(ocrWorker, detailedFrame);
-
-                    // Jika browser menyediakan foto resolusi tinggi, pakai hanya
-                    // sebagai upaya terakhir. Jalur cepat tetap langsung memakai
-                    // frame video agar respons awal tidak tertunda.
-                    if (!isUsefulOcrCandidate(candidate)) {
-                        const photoFrame = await takeHighResolutionPhoto();
-                        if (photoFrame) {
-                            announceScanProgress('Teks masih belum jelas. Memproses gambar resolusi tinggi.');
-                            candidate = await recognizeBookPage(ocrWorker, photoFrame);
-                        }
-                    }
-                }
+                const candidate = await recognizeBookPage(ocrWorker, frame);
 
                 if (!stream || textLocked || textEditedManually) return;
 
@@ -1445,11 +1417,30 @@
             }
 
             resetFrameStability();
-            // Browser web memakai frame kamera yang sedang tampil agar OCR
-            // dimulai segera, tanpa menunggu kamera bawaan mengambil foto lain.
-            // Bila hasilnya kurang jelas, scanPage otomatis mencoba satu kali
-            // lagi dengan ukuran lebih tinggi.
-            await scanPage({ force: true, fast: true });
+            if (!('ImageCapture' in window)) {
+                // Dipanggil langsung dari ketukan kedua supaya Chrome Android
+                // membuka kamera foto resolusi penuh, bukan mengambil frame video.
+                photoCaptureInput.value = '';
+                photoCaptureInput.click();
+                return;
+            }
+
+            try {
+                announceScanProgress('Mengambil foto halaman resolusi tinggi.');
+                const photoFrame = await takeHighResolutionPhoto();
+
+                if (!photoFrame) {
+                    throw new Error('Foto resolusi tinggi tidak tersedia.');
+                }
+
+                announceScanProgress('Foto halaman terdeteksi. Memproses teks asli.');
+                await scanPage({ force: true, preparedFrame: photoFrame });
+            } catch (error) {
+                console.error(error);
+                announceScanProgress('Foto halaman tidak dapat diambil. Coba lagi atau gunakan browser Chrome terbaru.', 'error');
+            } finally {
+                if (!scanning) setScanRequestPending(false);
+            }
         }
 
         function getAndroidOcrPlugin() {
@@ -1577,6 +1568,26 @@
             textEditedManually = true;
             textLocked = true;
             refreshCameraToggleButton();
+        });
+
+        photoCaptureInput.addEventListener('change', async () => {
+            const photoFile = photoCaptureInput.files?.[0];
+            photoCaptureInput.value = '';
+            setScanRequestPending(false);
+
+            if (!photoFile) {
+                setStatus('Pengambilan foto dibatalkan.');
+                return;
+            }
+
+            try {
+                announceScanProgress('Foto halaman terdeteksi. Memproses teks asli.');
+                const photoFrame = await renderPhotoFile(photoFile);
+                await scanPage({ force: true, preparedFrame: photoFrame });
+            } catch (error) {
+                console.error(error);
+                announceScanProgress('Foto halaman tidak dapat diproses. Ambil foto yang lebih terang lalu coba lagi.', 'error');
+            }
         });
 
         window.addEventListener('pagehide', () => {
