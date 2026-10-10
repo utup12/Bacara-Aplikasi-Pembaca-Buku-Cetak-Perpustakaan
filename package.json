@@ -4,9 +4,13 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "mobile:prepare": "node scripts/prepare-capacitor-web.mjs",
+        "mobile:sync": "npm run mobile:prepare && node scripts/sync-android.mjs",
+        "mobile:open": "npm run mobile:sync"
     },
     "devDependencies": {
+        "@capacitor/cli": "^8.5.3",
         "@tailwindcss/vite": "^4.0.0",
         "concurrently": "^10.0.3",
         "laravel-vite-plugin": "^3.1",
@@ -15,5 +19,9 @@
     },
     "optionalDependencies": {
         "@laravel/multiplex": "^0.4.1"
+    },
+    "dependencies": {
+        "@capacitor/android": "^8.5.3",
+        "@capacitor/core": "^8.5.3"
     }
 }

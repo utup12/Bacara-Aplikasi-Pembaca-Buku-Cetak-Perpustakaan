@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Bacara</string>
+    <string name="title_activity_main">Bacara</string>
+    <string name="package_name">id.bacara.reader</string>
+    <string name="custom_url_scheme">id.bacara.reader</string>
+</resources>

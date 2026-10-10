@@ -1291,6 +1291,8 @@
                 return;
             }
 
+            if (await scanWithAndroidOcr()) return;
+
             resetFrameStability();
             lastAutoScanAt = Date.now();
 
@@ -1309,6 +1311,61 @@
             // daripada frame video yang tersedia untuk browser.
             photoCaptureInput.value = '';
             photoCaptureInput.click();
+        }
+
+        function getAndroidOcrPlugin() {
+            if (!window.Capacitor?.isNativePlatform?.()) return null;
+
+            return window.Capacitor.Plugins?.BacaraOcr ?? null;
+        }
+
+        async function scanWithAndroidOcr() {
+            const androidOcr = getAndroidOcrPlugin();
+            if (!androidOcr) return false;
+
+            const cameraWasActive = stream !== null;
+            let finalMessage = '';
+            let finalMode = 'info';
+            if (cameraWasActive) stopCamera();
+
+            try {
+                setStatus('Membuka pemindai dokumen Android. Luruskan halaman lalu ambil foto.');
+                const result = await androidOcr.scanDocument();
+                const text = normalizeOcrText(result?.text ?? '');
+
+                if (!text) {
+                    finalMessage = 'Tidak ada teks yang terbaca. Luruskan halaman, pastikan cahaya cukup, lalu coba lagi.';
+                    finalMode = 'error';
+                    setStatus(finalMessage, finalMode);
+                    return true;
+                }
+
+                textArea.value = text;
+                lastDetectedText = text;
+                lastDetectedConfidence = 100;
+                lastDetectedScore = 250;
+                lastRecognitionState = 'detected';
+                textEditedManually = false;
+                finalMessage = 'Teks diperbarui oleh OCR Android resolusi penuh.';
+                finalMode = 'detected';
+                setStatus(finalMessage, finalMode);
+                return true;
+            } catch (error) {
+                if (error?.message === 'Pemindaian dibatalkan.') {
+                    finalMessage = 'Pemindaian dibatalkan.';
+                } else {
+                    console.error(error);
+                    finalMessage = 'OCR Android tidak dapat dijalankan. Coba izinkan kamera lalu pindai lagi.';
+                    finalMode = 'error';
+                }
+                setStatus(finalMessage, finalMode);
+                return true;
+            } finally {
+                if (cameraWasActive) {
+                    await startCamera();
+                }
+                if (finalMessage) setStatus(finalMessage, finalMode);
+            }
         }
 
         function attachDoubleActivation(button, getAnnouncement, action) {
