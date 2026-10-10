@@ -35,7 +35,7 @@ class CameraControlsTest extends TestCase
             ->assertSee('function configureIndonesianVoice', false);
     }
 
-    public function test_camera_page_provides_hold_and_double_activation_controls(): void
+    public function test_camera_page_locks_results_until_refresh_and_uses_double_activation_controls(): void
     {
         $response = $this->get('/');
 
@@ -43,8 +43,9 @@ class CameraControlsTest extends TestCase
             ->assertOk()
             ->assertSee('id="refresh-text"', false)
             ->assertSee('Refresh</button>', false)
-            ->assertSee('id="hold-text"', false)
-            ->assertSee('Tahan teks</button>', false)
+            ->assertDontSee('id="hold-text"', false)
+            ->assertSee('let textLocked = false', false)
+            ->assertSee('Ketuk dua kali tombol Refresh untuk memindai halaman baru.', false)
             ->assertSee('id="torch-toggle"', false)
             ->assertSee('function toggleTorch', false)
             ->assertSee('function attachDoubleActivation', false)
