@@ -53,6 +53,7 @@ await writeFile(
     resolve(cordovaDirectory, 'build.gradle'),
     [
         "apply plugin: 'com.android.library'",
+        "apply from: 'cordova.variables.gradle'",
         '',
         'android {',
         '    namespace = "capacitor.cordova.android.plugins"',
