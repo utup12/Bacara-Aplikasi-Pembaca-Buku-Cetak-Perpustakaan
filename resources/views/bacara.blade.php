@@ -426,6 +426,7 @@
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
+        const lightCanvas = document.createElement('canvas');
 
         let stream = null;
         let worker = null;
@@ -436,6 +437,12 @@
         let lastProgressUpdate = -25;
         let isReadingText = false;
         let speechSession = 0;
+        let lightTimer = null;
+        let torchAvailable = false;
+        let torchEnabled = false;
+        let isMeasuringLight = false;
+
+        const DARKNESS_THRESHOLD = 58;
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
@@ -559,6 +566,7 @@
                 detectionState = null;
                 setStatus('Kamera aktif. Pemantauan teks dimulai otomatis.');
                 refreshButtons();
+                startLightMonitor();
                 startAutomaticScan();
             } catch (error) {
                 setStatus('Kamera tidak dapat diakses. Izinkan akses kamera di browser, lalu coba lagi.', 'error');
@@ -578,6 +586,7 @@
 
         function stopCamera() {
             stopAutomaticScan();
+            stopLightMonitor();
             detectionState = null;
 
             if (stream) {
@@ -588,6 +597,94 @@
             video.srcObject = null;
             setStatus('Kamera dimatikan.');
             refreshButtons();
+        }
+
+        function getVideoTrack() {
+            return stream?.getVideoTracks()[0] ?? null;
+        }
+
+        function estimateLightLevel() {
+            if (!video.videoWidth || !video.videoHeight) return null;
+
+            const sampleWidth = 64;
+            const sampleHeight = 36;
+            lightCanvas.width = sampleWidth;
+            lightCanvas.height = sampleHeight;
+
+            const lightContext = lightCanvas.getContext('2d', { willReadFrequently: true });
+            lightContext.drawImage(video, 0, 0, sampleWidth, sampleHeight);
+
+            const pixels = lightContext.getImageData(0, 0, sampleWidth, sampleHeight).data;
+            let total = 0;
+            let samples = 0;
+
+            // Ambil setiap empat piksel saja agar pemantauan cahaya tetap sangat ringan.
+            for (let index = 0; index < pixels.length; index += 16) {
+                total += (pixels[index] * 0.2126) + (pixels[index + 1] * 0.7152) + (pixels[index + 2] * 0.0722);
+                samples += 1;
+            }
+
+            return samples ? total / samples : null;
+        }
+
+        async function enableTorchForDarkness() {
+            const track = getVideoTrack();
+            if (!track || !torchAvailable || torchEnabled) return;
+
+            try {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+                torchEnabled = true;
+                const message = 'Cahaya kurang. Senter kamera dinyalakan otomatis.';
+                setStatus(message);
+                speakGuidance(message);
+            } catch (error) {
+                // Sebagian perangkat melaporkan kemampuan torch, tetapi membatasinya pada mode tertentu.
+                torchAvailable = false;
+                console.info('Senter kamera tidak dapat dinyalakan otomatis.', error);
+            }
+        }
+
+        async function checkLightLevel() {
+            if (!stream || !torchAvailable || torchEnabled || isMeasuringLight) return;
+
+            isMeasuringLight = true;
+
+            try {
+                const lightLevel = estimateLightLevel();
+                if (lightLevel !== null && lightLevel < DARKNESS_THRESHOLD) {
+                    await enableTorchForDarkness();
+                }
+            } catch (error) {
+                console.info('Pengukuran cahaya kamera tidak tersedia.', error);
+            } finally {
+                isMeasuringLight = false;
+            }
+        }
+
+        function startLightMonitor() {
+            const track = getVideoTrack();
+            const capabilities = typeof track?.getCapabilities === 'function'
+                ? track.getCapabilities()
+                : {};
+
+            torchAvailable = capabilities.torch === true;
+            torchEnabled = false;
+
+            if (!torchAvailable) return;
+
+            window.setTimeout(checkLightLevel, 700);
+            lightTimer = window.setInterval(checkLightLevel, 1500);
+        }
+
+        function stopLightMonitor() {
+            if (lightTimer !== null) {
+                window.clearInterval(lightTimer);
+                lightTimer = null;
+            }
+
+            torchAvailable = false;
+            torchEnabled = false;
+            isMeasuringLight = false;
         }
 
         function captureFrame() {
@@ -607,8 +704,11 @@
             canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
             canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
 
+            const lightLevel = estimateLightLevel();
             const context = canvas.getContext('2d', { willReadFrequently: true });
-            context.filter = 'grayscale(1) contrast(1.45)';
+            context.filter = lightLevel !== null && lightLevel < 90
+                ? 'grayscale(1) contrast(1.85) brightness(1.22)'
+                : 'grayscale(1) contrast(1.45)';
             context.drawImage(
                 video,
                 sourceX,
@@ -642,10 +742,36 @@
                 }
             });
 
-            // Halaman buku umumnya satu blok teks; mode ini mempercepat segmentasi OCR.
-            await worker.setParameters({ tessedit_pageseg_mode: '6' });
+            // Mode blok teks tetap cepat, sambil mempertahankan spasi, angka, tanda baca, dan simbol daftar.
+            await worker.setParameters({
+                tessedit_pageseg_mode: '6',
+                preserve_interword_spaces: '1'
+            });
 
             return worker;
+        }
+
+        function normalizeOcrText(rawText) {
+            return rawText
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                // Samakan variasi ikon daftar agar mudah dibaca oleh pembaca layar.
+                .replace(/^([ \t]*)([\u2022\u25CF\u25CB\u25E6\u25AA\u25AB\u25A0\u25A1\u25C6\u25C7])\s*/gm, '$1\u2022 ')
+                .replace(/^([ \t]*)(\d+)\s*[\)\]]\s*/gm, '$1$2. ')
+                .replace(/^([ \t]*)([A-Za-z])\s*[\)\]]\s*/gm, '$1$2. ')
+                .trim();
+        }
+
+        function makeTextSpeakable(text) {
+            return text
+                .replace(/^([ \t]*)\u2022\s*/gm, '$1Poin. ')
+                .replace(/^([ \t]*)(\d+)[.)]\s*/gm, '$1Nomor $2. ')
+                .replace(/\u2713|\u2714/g, ' tanda centang ')
+                .replace(/\u2717|\u2715|\u2716/g, ' tanda silang ')
+                .replace(/\u2192/g, ' panah kanan ')
+                .replace(/\u2190/g, ' panah kiri ')
+                .replace(/\u2191/g, ' panah atas ')
+                .replace(/\u2193/g, ' panah bawah ');
         }
 
         async function scanText() {
@@ -666,10 +792,7 @@
                 setStatus('Membaca teks dari halaman buku…');
 
                 const result = await ocrWorker.recognize(frame);
-                const cleanText = result.data.text
-                    .replace(/[ \t]+\n/g, '\n')
-                    .replace(/\n{3,}/g, '\n\n')
-                    .trim();
+                const cleanText = normalizeOcrText(result.data.text);
 
                 if (!cleanText) {
                     reportDetection(false);
@@ -744,7 +867,7 @@
             const currentSpeechSession = ++speechSession;
             window.speechSynthesis.cancel();
 
-            const speech = new SpeechSynthesisUtterance(text);
+            const speech = new SpeechSynthesisUtterance(makeTextSpeakable(text));
             const indonesianVoice = getIndonesianVoice();
 
             if (indonesianVoice) {
