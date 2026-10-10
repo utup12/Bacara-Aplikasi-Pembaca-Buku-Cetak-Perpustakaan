@@ -35,7 +35,7 @@ class CameraControlsTest extends TestCase
             ->assertSee('photo-capture', false)
             ->assertSee('preserve_interword_spaces: \'0\'', false)
             ->assertSee('user_defined_dpi: \'300\'', false)
-            ->assertSee('worker.recognize(source, {}, { blocks: true })', false)
+            ->assertSee('ocrWorker.recognize(source, {}, { blocks: true })', false)
             ->assertSee('function getWordConfidenceValues', false)
             ->assertSee('function selectBestOcrCandidate', false)
             ->assertSee('function needsOcrFallback', false)
