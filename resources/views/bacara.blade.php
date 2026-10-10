@@ -88,6 +88,51 @@
             object-fit: cover;
         }
 
+        .scan-guide {
+            position: absolute;
+            inset: 7% 5%;
+            border: 3px solid rgba(255, 255, 255, .94);
+            border-radius: 8px;
+            box-shadow: 0 0 0 999px rgba(0, 0, 0, .26);
+            pointer-events: none;
+            transition: border-color .2s ease, box-shadow .2s ease;
+        }
+
+        .scan-guide::before {
+            content: 'Letakkan satu halaman buku di dalam bingkai';
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            width: max-content;
+            max-width: calc(100% - 20px);
+            transform: translateX(-50%);
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, .68);
+            color: #fff;
+            font-size: .8rem;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .camera[data-scan-state="steady"] .scan-guide {
+            border-color: var(--kuning);
+        }
+
+        .camera[data-scan-state="ready"] .scan-guide {
+            border-color: #55d68a;
+            box-shadow: 0 0 0 999px rgba(0, 0, 0, .15);
+        }
+
+        .camera[data-scan-state="reading"] .scan-guide {
+            border-color: #68b6ff;
+        }
+
+        .scan-action {
+            width: 100%;
+            margin-top: 12px;
+        }
+
         button {
             appearance: none;
             border: 2px solid var(--hijau);
@@ -258,7 +303,10 @@
 
                 <div class="camera">
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
+                    <div class="scan-guide" aria-hidden="true"></div>
                 </div>
+                <p class="small">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
+                <button class="scan-action" id="scan-now" type="button">Pindai halaman</button>
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
@@ -288,16 +336,19 @@
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
+        const cameraPreview = document.querySelector('.camera');
         const statusBox = document.getElementById('status');
         const textArea = document.getElementById('hasil-teks');
         const speakButton = document.getElementById('baca');
         const cameraToggleButton = document.getElementById('camera-toggle');
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const refreshTextButton = document.getElementById('refresh-text');
+        const scanNowButton = document.getElementById('scan-now');
         const holdTextButton = document.getElementById('hold-text');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
+        const frameQualityCanvas = document.createElement('canvas');
 
         let stream = null;
         let cameraStarting = false;
@@ -307,6 +358,7 @@
         let realtimeRecognitionActive = false;
         let lastDetectedText = '';
         let lastDetectedScore = 0;
+        let lastDetectedConfidence = 0;
         let lastRecognitionState = '';
         let textEditedManually = false;
         let textHeld = false;
@@ -317,16 +369,33 @@
         let torchAvailable = false;
         let torchEnabled = false;
         let isMeasuringLight = false;
+        let previousFramePixels = null;
+        let steadyFrameSamples = 0;
+        let lastAutoScanAt = 0;
 
         const DARKNESS_THRESHOLD = 58;
-        const REALTIME_SCAN_DELAY = 200;
-        const MINIMUM_OCR_CONFIDENCE = 18;
-        const OCR_TARGET_WIDTH = 1920;
+        const REALTIME_SCAN_DELAY = 300;
+        const MINIMUM_OCR_CONFIDENCE = 48;
+        const MINIMUM_WORD_CONFIDENCE = 42;
+        const OCR_TARGET_WIDTH = 2048;
+        const REQUIRED_STEADY_FRAME_SAMPLES = 3;
+        const FRAME_CHANGE_THRESHOLD = 10;
+        const MINIMUM_SHARPNESS = 18;
+        const AUTO_SCAN_COOLDOWN = 2400;
         const DOUBLE_ACTIVATION_DELAY = 450;
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
             statusBox.dataset.mode = mode;
+        }
+
+        function setCameraScanState(state) {
+            cameraPreview.dataset.scanState = state;
+        }
+
+        function resetFrameStability() {
+            previousFramePixels = null;
+            steadyFrameSamples = 0;
         }
 
         function getIndonesianVoice() {
@@ -397,6 +466,7 @@
             cameraToggleButton.textContent = cameraOn ? 'Matikan kamera' : 'Aktifkan kamera';
             cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
             cameraToggleButton.classList.toggle('warning', cameraOn);
+            scanNowButton.disabled = !cameraOn || cameraStarting || scanning || textHeld;
         }
 
         async function startCamera() {
@@ -415,8 +485,8 @@
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: 'environment' },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 },
+                        width: { ideal: 2560 },
+                        height: { ideal: 1440 },
                         frameRate: { ideal: 30, max: 30 }
                     },
                     audio: false
@@ -426,7 +496,8 @@
                 await video.play();
                 await waitForCameraFrame();
                 await optimizeCameraForText();
-                setStatus('Kamera aktif. Teks diperbarui secara berkelanjutan.');
+                setCameraScanState('waiting');
+                setStatus('Kamera aktif. Masukkan satu halaman ke bingkai dan tahan perangkat tetap stabil.');
                 refreshCameraToggleButton();
                 startLightMonitor();
                 startRealtimeTextRecognition();
@@ -449,6 +520,8 @@
             }
 
             video.srcObject = null;
+            resetFrameStability();
+            setCameraScanState('waiting');
             setStatus('Kamera dimatikan.');
             refreshCameraToggleButton();
         }
@@ -596,13 +669,16 @@
                 throw new Error('Ukuran video belum tersedia.');
             }
 
-            const inset = 0.015;
-            const sourceX = Math.floor(video.videoWidth * inset);
-            const sourceY = Math.floor(video.videoHeight * inset);
-            const sourceWidth = Math.floor(video.videoWidth * (1 - (inset * 2)));
-            const sourceHeight = Math.floor(video.videoHeight * (1 - (inset * 2)));
+            // Samakan area OCR dengan bingkai yang dilihat pengguna, bukan seluruh video.
+            const insetX = 0.05;
+            const insetY = 0.07;
+            const sourceX = Math.floor(video.videoWidth * insetX);
+            const sourceY = Math.floor(video.videoHeight * insetY);
+            const sourceWidth = Math.floor(video.videoWidth * (1 - (insetX * 2)));
+            const sourceHeight = Math.floor(video.videoHeight * (1 - (insetY * 2)));
             const maxOcrWidth = OCR_TARGET_WIDTH;
-            const scale = Math.min(1, maxOcrWidth / sourceWidth);
+            // Sedikit pembesaran membantu bila kamera hanya dapat menyediakan video HD.
+            const scale = Math.min(1.5, maxOcrWidth / sourceWidth);
 
             canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
             canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
@@ -612,8 +688,8 @@
             context.imageSmoothingEnabled = true;
             context.imageSmoothingQuality = 'high';
             context.filter = lightLevel !== null && lightLevel < 90
-                ? 'grayscale(1) contrast(1.55) brightness(1.2)'
-                : 'grayscale(1) contrast(1.28) brightness(1.05)';
+                ? 'grayscale(1) contrast(1.75) brightness(1.28)'
+                : 'grayscale(1) contrast(1.42) brightness(1.08)';
             context.drawImage(
                 video,
                 sourceX,
@@ -626,8 +702,133 @@
                 canvas.height
             );
             context.filter = 'none';
+            enhanceDocumentImage(context, canvas.width, canvas.height);
 
             return canvas;
+        }
+
+        function clampByte(value) {
+            return Math.max(0, Math.min(255, Math.round(value)));
+        }
+
+        function percentileFromHistogram(histogram, total, percentile) {
+            const target = total * percentile;
+            let accumulated = 0;
+
+            for (let value = 0; value < histogram.length; value += 1) {
+                accumulated += histogram[value];
+                if (accumulated >= target) return value;
+            }
+
+            return histogram.length - 1;
+        }
+
+        function enhanceDocumentImage(context, width, height) {
+            const imageData = context.getImageData(0, 0, width, height);
+            const { data } = imageData;
+            const histogram = new Uint32Array(256);
+            const pixelCount = width * height;
+
+            for (let index = 0; index < data.length; index += 4) {
+                const luminance = clampByte(
+                    (data[index] * 0.2126)
+                    + (data[index + 1] * 0.7152)
+                    + (data[index + 2] * 0.0722)
+                );
+                histogram[luminance] += 1;
+            }
+
+            const blackPoint = percentileFromHistogram(histogram, pixelCount, 0.015);
+            const whitePoint = percentileFromHistogram(histogram, pixelCount, 0.985);
+            const range = Math.max(24, whitePoint - blackPoint);
+
+            for (let index = 0; index < data.length; index += 4) {
+                const luminance = (data[index] * 0.2126)
+                    + (data[index + 1] * 0.7152)
+                    + (data[index + 2] * 0.0722);
+                const normalized = clampByte(((luminance - blackPoint) * 255) / range);
+                const contrasted = clampByte(((normalized - 128) * 1.22) + 128);
+                // Putihkan latar kertas tanpa memaksakan threshold hitam/putih yang
+                // dapat menghilangkan huruf kecil atau tanda baca.
+                const enhanced = contrasted > 210
+                    ? clampByte(210 + ((contrasted - 210) * 1.5))
+                    : contrasted;
+
+                data[index] = enhanced;
+                data[index + 1] = enhanced;
+                data[index + 2] = enhanced;
+            }
+
+            context.putImageData(imageData, 0, 0);
+        }
+
+        function inspectFrameQuality() {
+            if (!video.videoWidth || !video.videoHeight) return null;
+
+            const sampleWidth = 96;
+            const sampleHeight = 54;
+            frameQualityCanvas.width = sampleWidth;
+            frameQualityCanvas.height = sampleHeight;
+
+            const context = frameQualityCanvas.getContext('2d', { willReadFrequently: true });
+            const insetX = video.videoWidth * 0.05;
+            const insetY = video.videoHeight * 0.07;
+            context.drawImage(
+                video,
+                insetX,
+                insetY,
+                video.videoWidth - (insetX * 2),
+                video.videoHeight - (insetY * 2),
+                0,
+                0,
+                sampleWidth,
+                sampleHeight
+            );
+
+            const rgba = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+            const pixels = new Uint8Array(sampleWidth * sampleHeight);
+            let brightness = 0;
+
+            for (let pixel = 0, index = 0; index < rgba.length; pixel += 1, index += 4) {
+                const luminance = clampByte(
+                    (rgba[index] * 0.2126)
+                    + (rgba[index + 1] * 0.7152)
+                    + (rgba[index + 2] * 0.0722)
+                );
+                pixels[pixel] = luminance;
+                brightness += luminance;
+            }
+
+            let movement = 0;
+            if (previousFramePixels) {
+                for (let index = 0; index < pixels.length; index += 1) {
+                    movement += Math.abs(pixels[index] - previousFramePixels[index]);
+                }
+                movement /= pixels.length;
+            } else {
+                movement = Number.POSITIVE_INFINITY;
+            }
+
+            let edgeStrength = 0;
+            let edgeSamples = 0;
+            for (let y = 1; y < sampleHeight - 1; y += 2) {
+                for (let x = 1; x < sampleWidth - 1; x += 2) {
+                    const index = (y * sampleWidth) + x;
+                    edgeStrength += Math.abs(pixels[index + 1] - pixels[index - 1]);
+                    edgeStrength += Math.abs(pixels[index + sampleWidth] - pixels[index - sampleWidth]);
+                    edgeSamples += 2;
+                }
+            }
+
+            previousFramePixels = pixels;
+
+            return {
+                brightness: brightness / pixels.length,
+                movement,
+                sharpness: edgeSamples ? edgeStrength / edgeSamples : 0,
+                isStable: movement <= FRAME_CHANGE_THRESHOLD,
+                isSharp: edgeSamples ? (edgeStrength / edgeSamples) >= MINIMUM_SHARPNESS : false
+            };
         }
 
         async function getWorker() {
@@ -658,13 +859,29 @@
             const letters = (compactText.match(/[A-Za-zÀ-ÿ]/g) ?? []).length;
             const words = text.match(/[A-Za-zÀ-ÿ]{2,}/g) ?? [];
             const confidence = Number(result.data.confidence) || 0;
+            const recognizedWords = Array.isArray(result.data.words) ? result.data.words : [];
+            const wordConfidences = recognizedWords
+                .map((word) => Number(word.confidence))
+                .filter((wordConfidence) => Number.isFinite(wordConfidence));
+            const wordConfidence = wordConfidences.length
+                ? wordConfidences.reduce((total, value) => total + value, 0) / wordConfidences.length
+                : confidence;
             const letterRatio = compactText.length ? letters / compactText.length : 0;
             const score = (confidence * 0.75)
+                + (wordConfidence * 0.15)
                 + Math.min(25, letters / 10)
                 + Math.min(15, words.length * 1.5)
                 + (letterRatio * 10);
 
-            return { text, confidence, letters, words: words.length, letterRatio, score };
+            return {
+                text,
+                confidence,
+                wordConfidence,
+                letters,
+                words: words.length,
+                letterRatio,
+                score
+            };
         }
 
         function isUsefulOcrCandidate(candidate) {
@@ -672,7 +889,9 @@
                 return false;
             }
 
-            return candidate.confidence >= MINIMUM_OCR_CONFIDENCE || candidate.letterRatio >= 0.55;
+            return candidate.confidence >= MINIMUM_OCR_CONFIDENCE
+                && candidate.wordConfidence >= MINIMUM_WORD_CONFIDENCE
+                && candidate.letterRatio >= 0.5;
         }
 
         async function recognizeBookPage(ocrWorker) {
@@ -684,14 +903,15 @@
                 return paragraphCandidate;
             }
 
-            // Mode sparse membantu ketika posisi buku tidak lurus atau halaman terdiri dari beberapa blok teks.
-            await ocrWorker.setParameters({ tessedit_pageseg_mode: '11' });
-            const sparseResult = await ocrWorker.recognize(frame);
+            // Mode blok tunggal cocok untuk paragraf buku; mode kolom dipakai
+            // hanya sebagai cadangan agar urutan kalimat tidak mudah berantakan.
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '4' });
+            const columnResult = await ocrWorker.recognize(frame);
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
-            const sparseCandidate = createOcrCandidate(sparseResult);
+            const columnCandidate = createOcrCandidate(columnResult);
 
-            return sparseCandidate.score > paragraphCandidate.score
-                ? sparseCandidate
+            return columnCandidate.score > paragraphCandidate.score
+                ? columnCandidate
                 : paragraphCandidate;
         }
 
@@ -699,6 +919,7 @@
             if (!stream || realtimeRecognitionActive || textHeld) return;
 
             realtimeRecognitionActive = true;
+            resetFrameStability();
             scheduleRealtimeTextRecognition(150);
         }
 
@@ -709,6 +930,8 @@
                 window.clearTimeout(realtimeScanTimer);
                 realtimeScanTimer = null;
             }
+
+            resetFrameStability();
         }
 
         function scheduleRealtimeTextRecognition(delay = REALTIME_SCAN_DELAY) {
@@ -721,43 +944,108 @@
             }, delay);
         }
 
-        async function recognizeTextInRealtime() {
-            if (!stream || !realtimeRecognitionActive || textHeld || scanning || video.readyState < 2) return;
+        function shouldReplaceDetectedText(candidate, force = false) {
+            if (force || !lastDetectedText) return true;
+            if (candidate.text === lastDetectedText) return candidate.score >= lastDetectedScore;
+
+            // Jangan mengganti hasil yang baik dengan pembacaan yang sedikit lebih buruk.
+            return candidate.score >= lastDetectedScore + 6
+                && candidate.confidence >= lastDetectedConfidence - 1;
+        }
+
+        async function scanPage({ force = false } = {}) {
+            if (!stream || textHeld || scanning || video.readyState < 2) return;
 
             scanning = true;
+            refreshCameraToggleButton();
+            setCameraScanState('reading');
 
             try {
                 const ocrWorker = await getWorker();
                 const candidate = await recognizeBookPage(ocrWorker);
 
-                if (!realtimeRecognitionActive || textHeld || textEditedManually) return;
+                if (!stream || textHeld || textEditedManually) return;
 
                 if (!isUsefulOcrCandidate(candidate)) {
                     if (lastRecognitionState !== 'unclear') {
-                        setStatus('Teks belum cukup jelas. Bersihkan lensa, dekatkan kamera, lalu tahan buku tetap stabil.', 'error');
+                        setStatus('Teks belum cukup jelas. Bersihkan lensa, luruskan halaman, lalu tahan kamera tetap stabil.', 'error');
                         lastRecognitionState = 'unclear';
                     }
                     return;
                 }
 
-                const isBetterReading = candidate.score >= lastDetectedScore - 4;
-
-                if (candidate.text !== lastDetectedText && (isBetterReading || !lastDetectedText)) {
-                    textArea.value = candidate.text;
-                    lastDetectedText = candidate.text;
-                    lastDetectedScore = candidate.score;
-                    lastRecognitionState = 'detected';
-                    setStatus('Teks diperbarui. Pemindaian terus berjalan.', 'detected');
-                } else if (candidate.text === lastDetectedText) {
-                    lastDetectedScore = Math.max(lastDetectedScore, candidate.score);
+                if (!shouldReplaceDetectedText(candidate, force)) {
+                    if (candidate.text === lastDetectedText) {
+                        lastDetectedScore = Math.max(lastDetectedScore, candidate.score);
+                        lastDetectedConfidence = Math.max(lastDetectedConfidence, candidate.confidence);
+                    }
+                    return;
                 }
+
+                textArea.value = candidate.text;
+                lastDetectedText = candidate.text;
+                lastDetectedScore = candidate.score;
+                lastDetectedConfidence = candidate.confidence;
+                lastRecognitionState = 'detected';
+                setStatus('Teks diperbarui dari frame yang stabil dan tajam.', 'detected');
             } catch (error) {
                 console.error(error);
                 setStatus('Deteksi teks tidak dapat dijalankan. Periksa koneksi internet, lalu aktifkan kamera kembali.', 'error');
                 stopRealtimeTextRecognition();
             } finally {
                 scanning = false;
+                setCameraScanState(stream ? 'ready' : 'waiting');
+                refreshCameraToggleButton();
             }
+        }
+
+        async function recognizeTextInRealtime() {
+            if (!stream || !realtimeRecognitionActive || textHeld || scanning || video.readyState < 2) return;
+
+            const quality = inspectFrameQuality();
+            if (!quality) return;
+
+            if (quality.brightness < DARKNESS_THRESHOLD) {
+                steadyFrameSamples = 0;
+                setCameraScanState('waiting');
+                if (lastRecognitionState !== 'dark') {
+                    setStatus('Cahaya kurang. Tambahkan pencahayaan agar tulisan terbaca.', 'error');
+                    lastRecognitionState = 'dark';
+                }
+                return;
+            }
+
+            if (!quality.isStable) {
+                steadyFrameSamples = 0;
+                setCameraScanState('waiting');
+                if (lastRecognitionState !== 'moving') {
+                    setStatus('Tahan kamera tetap stabil di atas halaman buku.');
+                    lastRecognitionState = 'moving';
+                }
+                return;
+            }
+
+            if (!quality.isSharp) {
+                steadyFrameSamples = 0;
+                setCameraScanState('waiting');
+                if (lastRecognitionState !== 'blurred') {
+                    setStatus('Teks masih buram. Dekatkan kamera atau sentuh layar untuk memfokuskan kamera.', 'error');
+                    lastRecognitionState = 'blurred';
+                }
+                return;
+            }
+
+            steadyFrameSamples += 1;
+            setCameraScanState(steadyFrameSamples >= REQUIRED_STEADY_FRAME_SAMPLES ? 'ready' : 'steady');
+
+            if (steadyFrameSamples < REQUIRED_STEADY_FRAME_SAMPLES
+                || Date.now() - lastAutoScanAt < AUTO_SCAN_COOLDOWN
+                || textEditedManually) {
+                return;
+            }
+
+            lastAutoScanAt = Date.now();
+            await scanPage();
         }
 
         function makeTextSpeakable(text) {
@@ -831,6 +1119,7 @@
 
             lastDetectedText = '';
             lastDetectedScore = 0;
+            lastDetectedConfidence = 0;
             lastRecognitionState = '';
             textEditedManually = false;
             setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui secara berkelanjutan.');
@@ -857,11 +1146,23 @@
             textArea.value = '';
             lastDetectedText = '';
             lastDetectedScore = 0;
+            lastDetectedConfidence = 0;
             lastRecognitionState = '';
             textEditedManually = false;
             setStatus(textHeld
                 ? 'Hasil teks dikosongkan dan tetap ditahan.'
                 : 'Hasil teks dikosongkan. Deteksi real-time tetap berjalan.');
+        }
+
+        async function scanCurrentPage() {
+            if (textHeld || textEditedManually) {
+                setStatus('Lanjutkan atau refresh hasil teks terlebih dahulu sebelum memindai halaman baru.', 'error');
+                return;
+            }
+
+            resetFrameStability();
+            lastAutoScanAt = Date.now();
+            await scanPage({ force: true });
         }
 
         function attachDoubleActivation(button, getAnnouncement, action) {
@@ -887,7 +1188,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan buku di tempat yang cukup terang, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Kamera akan membaca teks secara berkelanjutan. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman dapat digunakan untuk memindai ulang secara manual. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
@@ -905,6 +1206,11 @@
             toggleCamera
         );
         attachDoubleActivation(
+            scanNowButton,
+            () => 'Tombol Pindai halaman. Ketuk cepat dua kali untuk mengambil teks dari halaman yang ada di dalam bingkai.',
+            scanCurrentPage
+        );
+        attachDoubleActivation(
             stopSpeechButton,
             () => 'Tombol Hentikan suara. Ketuk cepat dua kali untuk menghentikan pembacaan.',
             stopSpeech
@@ -917,7 +1223,7 @@
         attachDoubleActivation(
             holdTextButton,
             () => textHeld
-                ? 'Tombol Lanjutkan teks. Ketuk cepat dua kali agar hasil diperbarui kembali setiap lima detik.'
+                ? 'Tombol Lanjutkan teks. Ketuk cepat dua kali agar hasil dipindai kembali ketika kamera stabil.'
                 : 'Tombol Tahan teks. Ketuk cepat dua kali agar hasil teks tidak berubah.',
             toggleTextHold
         );
