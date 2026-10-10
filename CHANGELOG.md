@@ -1,6 +1,8 @@
 # Release Notes
 
-## [Unreleased](https://github.com/laravel/laravel/compare/v13.11.0...13.x)
+## [Unreleased](https://github.com/laravel/laravel/compare/Aplikasi...main)
+
+## [Aplikasi](https://github.com/laravel/laravel/compare/v13.11.0...Aplikasi) - 2026-10-10
 
 ## [v13.11.0](https://github.com/laravel/laravel/compare/v13.10.1...v13.11.0) - 2026-09-30
 
