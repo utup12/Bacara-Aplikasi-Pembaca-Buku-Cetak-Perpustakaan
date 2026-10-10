@@ -189,22 +189,6 @@
             border-color: #0b4f43;
         }
 
-        .torch-button {
-            position: absolute;
-            right: 0;
-            bottom: calc(100% + 10px);
-            min-height: 48px;
-            padding-inline: 16px;
-            background: var(--putih);
-            box-shadow: 0 3px 12px rgba(12, 48, 38, .25);
-        }
-
-        .torch-button[aria-pressed="true"] {
-            background: var(--kuning);
-            border-color: #6d5200;
-            color: #3d2e00;
-        }
-
         .sr-only {
             position: absolute;
             width: 1px;
@@ -217,21 +201,17 @@
             border: 0;
         }
 
-        .speak-dock-wrap {
+        .speak-dock {
             position: fixed;
             z-index: 30;
             left: 50%;
             bottom: max(16px, env(safe-area-inset-bottom));
             transform: translateX(-50%);
             width: min(calc(100% - 28px), 640px);
-        }
-
-        .speak-dock {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 10px;
-            width: 100%;
         }
 
         .speak-dock button {
@@ -283,7 +263,7 @@
             }
             .panel { padding: 16px; }
             main { padding: 10px 14px 40px; }
-            .speak-dock-wrap {
+            .speak-dock {
                 gap: 6px;
                 width: calc(100% - 20px);
             }
@@ -334,15 +314,12 @@
     <canvas id="canvas" hidden></canvas>
     <input id="photo-capture" type="file" accept="image/*" capture="environment" hidden>
 
-    <div class="speak-dock-wrap">
-        <button class="torch-button" id="torch-toggle" type="button" aria-pressed="false" hidden>Nyalakan senter</button>
-        <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
-            <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
-            <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
-            <button id="scan-now" type="button">Pindai halaman</button>
-            <button id="hentikan-suara" type="button">Hentikan suara</button>
-            <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
-        </div>
+    <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
+        <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
+        <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
+        <button id="scan-now" type="button">Pindai halaman</button>
+        <button id="hentikan-suara" type="button">Hentikan suara</button>
+        <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
     </div>
     <p class="sr-only" id="bantuan-baca">Ketuk sekali untuk mendengar fungsi tombol. Ketuk dua kali dengan cepat untuk menjalankannya.</p>
 
@@ -359,13 +336,11 @@
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const refreshTextButton = document.getElementById('refresh-text');
         const scanNowButton = document.getElementById('scan-now');
-        const torchToggleButton = document.getElementById('torch-toggle');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
         const frameQualityCanvas = document.createElement('canvas');
         const binaryCanvas = document.createElement('canvas');
-        const baselineOcrCanvas = document.createElement('canvas');
 
         let stream = null;
         let cameraStarting = false;
@@ -385,10 +360,6 @@
         let isReadingText = false;
         let speechSession = 0;
         let initialGuidancePlayed = false;
-        let lightTimer = null;
-        let torchAvailable = false;
-        let torchEnabled = false;
-        let isMeasuringLight = false;
         let scanRequestPending = false;
         let previousFramePixels = null;
         let steadyFrameSamples = 0;
@@ -509,18 +480,6 @@
             scanNowButton.disabled = !cameraOn || cameraStarting || scanning || scanRequestPending || textLocked;
         }
 
-        function refreshTorchButton() {
-            // Beberapa Chrome Android tidak mengumumkan capability `torch`,
-            // meskipun applyConstraints({ torch }) tetap berfungsi. Tampilkan
-            // kontrol selama kamera aktif dan uji kemampuan saat pengguna
-            // menjalankannya, bukan menyembunyikannya lebih dulu.
-            const cameraOn = stream !== null;
-            torchToggleButton.hidden = !cameraOn;
-            torchToggleButton.disabled = !cameraOn;
-            torchToggleButton.textContent = torchEnabled ? 'Matikan senter' : 'Nyalakan senter';
-            torchToggleButton.setAttribute('aria-pressed', String(torchEnabled));
-        }
-
         async function startCamera() {
             if (stream || cameraStarting) return;
 
@@ -551,7 +510,6 @@
                 setCameraScanState('waiting');
                 setStatus('Kamera aktif. Masukkan satu halaman ke bingkai dan tahan perangkat tetap stabil.');
                 refreshCameraToggleButton();
-                startLightMonitor();
                 startRealtimeTextRecognition();
                 warmOcrWorker();
             } catch (error) {
@@ -565,7 +523,6 @@
 
         function stopCamera() {
             stopRealtimeTextRecognition();
-            stopLightMonitor();
             scanRequestPending = false;
 
             if (stream) {
@@ -591,24 +548,6 @@
 
         function getVideoTrack() {
             return stream?.getVideoTracks()[0] ?? null;
-        }
-
-        function getTorchCapabilities(track) {
-            const capabilities = typeof track?.getCapabilities === 'function'
-                ? track.getCapabilities()
-                : {};
-            const rawTorch = capabilities.torch;
-            const values = Array.isArray(rawTorch)
-                ? rawTorch
-                : typeof rawTorch === 'boolean'
-                    ? [rawTorch]
-                    : [];
-
-            return {
-                advertised: values.length > 0,
-                canTurnOn: values.includes(true),
-                canTurnOff: values.includes(false)
-            };
         }
 
         function waitForCameraFrame() {
@@ -674,67 +613,6 @@
             }
 
             return samples ? total / samples : null;
-        }
-
-        function startLightMonitor() {
-            const track = getVideoTrack();
-            const capabilities = getTorchCapabilities(track);
-
-            // Standar Image Capture mengembalikan torch sebagai array nilai
-            // (biasanya [true, false]), bukan selalu boolean tunggal.
-            torchAvailable = capabilities.canTurnOn;
-            torchEnabled = track?.getSettings?.().torch === true;
-            refreshTorchButton();
-        }
-
-        async function toggleTorch() {
-            const track = getVideoTrack();
-            if (!track) {
-                const message = 'Aktifkan kamera terlebih dahulu untuk menggunakan senter.';
-                setStatus(message, 'error');
-                speakGuidance(message);
-                return;
-            }
-
-            try {
-                const shouldEnable = !torchEnabled;
-                // Constraint utama memberi kegagalan nyata pada browser modern.
-                // Fallback advanced menjaga kompatibilitas Chrome Android lama.
-                try {
-                    await track.applyConstraints({ torch: shouldEnable });
-                } catch (constraintError) {
-                    await track.applyConstraints({ advanced: [{ torch: shouldEnable }] });
-                }
-                const appliedSetting = track.getSettings?.().torch;
-                if (typeof appliedSetting === 'boolean' && appliedSetting !== shouldEnable) {
-                    throw new Error('Pengaturan senter tidak diterapkan oleh kamera.');
-                }
-                torchAvailable = true;
-                torchEnabled = shouldEnable;
-                await optimizeCameraForText();
-                refreshTorchButton();
-                const message = shouldEnable ? 'Senter kamera dinyalakan.' : 'Senter kamera dimatikan.';
-                setStatus(message);
-                speakGuidance(message);
-            } catch (error) {
-                console.info('Senter kamera tidak dapat diubah.', error);
-                torchAvailable = false;
-                const message = 'Senter kamera tidak dapat diubah pada perangkat ini.';
-                setStatus(message, 'error');
-                speakGuidance(message);
-            }
-        }
-
-        function stopLightMonitor() {
-            if (lightTimer !== null) {
-                window.clearInterval(lightTimer);
-                lightTimer = null;
-            }
-
-            torchAvailable = false;
-            torchEnabled = false;
-            isMeasuringLight = false;
-            refreshTorchButton();
         }
 
         function captureFrame(maxOcrWidth = VIDEO_OCR_TARGET_WIDTH) {
@@ -815,24 +693,17 @@
 
             const bitmap = await createImageBitmap(file);
             try {
-                return {
-                    baseline: renderOcrImage(
-                        bitmap,
-                        bitmap.width,
-                        bitmap.height,
-                        PHOTO_OCR_TARGET_WIDTH,
-                        null,
-                        { cropToGuide: false, enhance: false, targetCanvas: baselineOcrCanvas }
-                    ),
-                    enhanced: renderOcrImage(
-                        bitmap,
-                        bitmap.width,
-                        bitmap.height,
-                        PHOTO_OCR_TARGET_WIDTH,
-                        null,
-                        { cropToGuide: false, enhance: true, targetCanvas: canvas }
-                    )
-                };
+                // Satu kanvas resolusi tinggi menghindari pekerjaan piksel yang
+                // sama dua kali sebelum OCR dimulai. Foto asli tetap menjadi
+                // sumbernya; peningkatan ini hanya membantu kontras cetakan.
+                return renderOcrImage(
+                    bitmap,
+                    bitmap.width,
+                    bitmap.height,
+                    PHOTO_OCR_TARGET_WIDTH,
+                    null,
+                    { cropToGuide: false, enhance: true, targetCanvas: canvas }
+                );
             } finally {
                 bitmap.close?.();
             }
@@ -1189,6 +1060,16 @@
                 && candidate.letterRatio >= 0.35;
         }
 
+        function needsOcrFallback(candidate) {
+            // Pembacaan utama sudah memakai foto resolusi tinggi. Jalankan
+            // threshold adaptif yang lebih lambat hanya saat mutu hasilnya
+            // belum cukup baik; ini menjaga pemindaian normal tetap cepat.
+            return !isUsefulOcrCandidate(candidate)
+                || candidate.confidence < 52
+                || candidate.wordConfidence < 48
+                || candidate.letterRatio < 0.55;
+        }
+
         async function recognizeOcrCandidate(ocrWorker, source, pageSegmentationMode) {
             await ocrWorker.setParameters({ tessedit_pageseg_mode: String(pageSegmentationMode) });
             const result = await waitForOcrOperation(
@@ -1205,24 +1086,27 @@
             return candidates.reduce((best, candidate) => candidate.score > best.score ? candidate : best);
         }
 
-        async function recognizeBookPage(ocrWorker, photoFrames) {
-            const baselineFrame = photoFrames?.baseline ?? photoFrames;
-            const enhancedFrame = photoFrames?.enhanced ?? photoFrames;
+        async function recognizeBookPage(ocrWorker, frame) {
+            // Jalur utama: satu pembacaan tata letak otomatis dari foto penuh
+            // beresolusi tinggi. Sebelumnya empat pembacaan serial membuat
+            // pengguna menunggu lama, padahal kebanyakan halaman sudah jelas
+            // pada percobaan pertama.
+            setStatus('Membaca teks halaman. Mohon tunggu.');
+            const primaryCandidate = await recognizeOcrCandidate(ocrWorker, frame, 3);
 
-            // Mode akurasi tinggi: beberapa model tata letak dibandingkan atas
-            // foto yang sama. Yang ditampilkan tetap satu data.text mentah dari
-            // kandidat terbaik—bukan gabungan atau koreksi buatan aplikasi.
-            setStatus('Mencocokkan beberapa pembacaan halaman agar hasil lebih akurat. Mohon tunggu.');
-            const candidates = [];
-            candidates.push(await recognizeOcrCandidate(ocrWorker, baselineFrame, 3));
-            candidates.push(await recognizeOcrCandidate(ocrWorker, enhancedFrame, 4));
+            if (!needsOcrFallback(primaryCandidate)) {
+                return primaryCandidate;
+            }
 
-            const adaptiveFrame = createAdaptiveDocumentCanvas(enhancedFrame);
-            candidates.push(await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 3));
-            candidates.push(await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 6));
+            // Foto gelap, berbayang, atau kurang tegas memperoleh satu
+            // percobaan cadangan. Yang dipakai tetap data.text mentah dari
+            // kandidat dengan skor tertinggi—tanpa penggabungan atau koreksi.
+            setStatus('Memeriksa ulang foto untuk ketelitian teks. Mohon tunggu.');
+            const adaptiveFrame = createAdaptiveDocumentCanvas(frame);
+            const fallbackCandidate = await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 6);
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
 
-            return selectBestOcrCandidate(candidates);
+            return selectBestOcrCandidate([primaryCandidate, fallbackCandidate]);
         }
 
         function startRealtimeTextRecognition() {
@@ -1578,7 +1462,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memberi tahu ketika halaman siap dipindai. Tombol Pindai halaman membaca halaman yang terlihat. Hasil tetap tersimpan sampai Anda memakai tombol Refresh untuk memindai halaman baru. Jika kamera mendukungnya, tombol Senter berada tepat di atas tombol Refresh. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memberi tahu ketika halaman siap dipindai. Tombol Pindai halaman membaca halaman yang terlihat. Hasil tetap tersimpan sampai Anda memakai tombol Refresh untuk memindai halaman baru. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
@@ -1610,14 +1494,6 @@
             () => 'Tombol Refresh. Ketuk cepat dua kali untuk mengosongkan hasil teks.',
             refreshText
         );
-        attachDoubleActivation(
-            torchToggleButton,
-            () => torchEnabled
-                ? 'Tombol Matikan senter. Ketuk cepat dua kali untuk mematikan senter kamera.'
-                : 'Tombol Nyalakan senter. Ketuk cepat dua kali untuk menyalakan senter kamera.',
-            toggleTorch
-        );
-
         rate.addEventListener('input', () => {
             rateValue.textContent = Number(rate.value).toFixed(1);
         });
