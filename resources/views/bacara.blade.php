@@ -322,7 +322,7 @@
                 <h2 id="judul-teks" class="sr-only">Hasil teks</h2>
 
                 <label for="hasil-teks">Hasil teks</label>
-                <textarea id="hasil-teks" placeholder="Hasil teks akan muncul di sini."></textarea>
+                <textarea id="hasil-teks" placeholder="Hasil teks akan muncul di sini." readonly aria-label="Hasil OCR asli, dapat dipilih dan disalin"></textarea>
 
                 <label for="kecepatan">Kecepatan suara: <output id="nilai-kecepatan">0.9</output></label>
                 <input id="kecepatan" type="range" min="0.6" max="1.3" step="0.1" value="0.9">
@@ -365,6 +365,7 @@
         const lightCanvas = document.createElement('canvas');
         const frameQualityCanvas = document.createElement('canvas');
         const binaryCanvas = document.createElement('canvas');
+        const baselineOcrCanvas = document.createElement('canvas');
 
         let stream = null;
         let cameraStarting = false;
@@ -401,8 +402,9 @@
         const MINIMUM_WORD_CONFIDENCE = 22;
         const MINIMUM_TEXT_LENGTH = 6;
         const MINIMUM_LETTER_COUNT = 4;
-        const OCR_START_TIMEOUT = 45000;
-        const OCR_RECOGNITION_TIMEOUT = 45000;
+        const OCR_START_TIMEOUT = 60000;
+        const OCR_RECOGNITION_TIMEOUT = 60000;
+        const ADAPTIVE_OCR_TARGET_WIDTH = 1600;
         const VIDEO_OCR_TARGET_WIDTH = 2048;
         // Ukuran ini cukup tajam untuk cetakan buku, tetapi jauh lebih ringan
         // daripada foto asli pada RAM dan CPU ponsel.
@@ -508,9 +510,13 @@
         }
 
         function refreshTorchButton() {
-            const canUseTorch = stream !== null && torchAvailable;
-            torchToggleButton.hidden = !canUseTorch;
-            torchToggleButton.disabled = !canUseTorch;
+            // Beberapa Chrome Android tidak mengumumkan capability `torch`,
+            // meskipun applyConstraints({ torch }) tetap berfungsi. Tampilkan
+            // kontrol selama kamera aktif dan uji kemampuan saat pengguna
+            // menjalankannya, bukan menyembunyikannya lebih dulu.
+            const cameraOn = stream !== null;
+            torchToggleButton.hidden = !cameraOn;
+            torchToggleButton.disabled = !cameraOn;
             torchToggleButton.textContent = torchEnabled ? 'Matikan senter' : 'Nyalakan senter';
             torchToggleButton.setAttribute('aria-pressed', String(torchEnabled));
         }
@@ -587,6 +593,24 @@
             return stream?.getVideoTracks()[0] ?? null;
         }
 
+        function getTorchCapabilities(track) {
+            const capabilities = typeof track?.getCapabilities === 'function'
+                ? track.getCapabilities()
+                : {};
+            const rawTorch = capabilities.torch;
+            const values = Array.isArray(rawTorch)
+                ? rawTorch
+                : typeof rawTorch === 'boolean'
+                    ? [rawTorch]
+                    : [];
+
+            return {
+                advertised: values.length > 0,
+                canTurnOn: values.includes(true),
+                canTurnOff: values.includes(false)
+            };
+        }
+
         function waitForCameraFrame() {
             if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
                 return Promise.resolve();
@@ -652,62 +676,21 @@
             return samples ? total / samples : null;
         }
 
-        async function enableTorchForDarkness() {
-            const track = getVideoTrack();
-            if (!track || !torchAvailable || torchEnabled) return;
-
-            try {
-                await track.applyConstraints({ advanced: [{ torch: true }] });
-                torchEnabled = true;
-                refreshTorchButton();
-                const message = 'Cahaya kurang. Senter kamera dinyalakan otomatis.';
-                setStatus(message);
-                speakGuidance(message);
-            } catch (error) {
-                // Sebagian perangkat melaporkan kemampuan torch, tetapi membatasinya pada mode tertentu.
-                torchAvailable = false;
-                refreshTorchButton();
-                console.info('Senter kamera tidak dapat dinyalakan otomatis.', error);
-            }
-        }
-
-        async function checkLightLevel() {
-            if (!stream || !torchAvailable || torchEnabled || isMeasuringLight) return;
-
-            isMeasuringLight = true;
-
-            try {
-                const lightLevel = estimateLightLevel();
-                if (lightLevel !== null && lightLevel < DARKNESS_THRESHOLD) {
-                    await enableTorchForDarkness();
-                }
-            } catch (error) {
-                console.info('Pengukuran cahaya kamera tidak tersedia.', error);
-            } finally {
-                isMeasuringLight = false;
-            }
-        }
-
         function startLightMonitor() {
             const track = getVideoTrack();
-            const capabilities = typeof track?.getCapabilities === 'function'
-                ? track.getCapabilities()
-                : {};
+            const capabilities = getTorchCapabilities(track);
 
-            torchAvailable = capabilities.torch === true;
-            torchEnabled = false;
+            // Standar Image Capture mengembalikan torch sebagai array nilai
+            // (biasanya [true, false]), bukan selalu boolean tunggal.
+            torchAvailable = capabilities.canTurnOn;
+            torchEnabled = track?.getSettings?.().torch === true;
             refreshTorchButton();
-
-            if (!torchAvailable) return;
-
-            window.setTimeout(checkLightLevel, 700);
-            lightTimer = window.setInterval(checkLightLevel, 1500);
         }
 
         async function toggleTorch() {
             const track = getVideoTrack();
-            if (!track || !torchAvailable) {
-                const message = 'Senter tidak tersedia pada kamera ini.';
+            if (!track) {
+                const message = 'Aktifkan kamera terlebih dahulu untuk menggunakan senter.';
                 setStatus(message, 'error');
                 speakGuidance(message);
                 return;
@@ -715,14 +698,27 @@
 
             try {
                 const shouldEnable = !torchEnabled;
-                await track.applyConstraints({ advanced: [{ torch: shouldEnable }] });
+                // Constraint utama memberi kegagalan nyata pada browser modern.
+                // Fallback advanced menjaga kompatibilitas Chrome Android lama.
+                try {
+                    await track.applyConstraints({ torch: shouldEnable });
+                } catch (constraintError) {
+                    await track.applyConstraints({ advanced: [{ torch: shouldEnable }] });
+                }
+                const appliedSetting = track.getSettings?.().torch;
+                if (typeof appliedSetting === 'boolean' && appliedSetting !== shouldEnable) {
+                    throw new Error('Pengaturan senter tidak diterapkan oleh kamera.');
+                }
+                torchAvailable = true;
                 torchEnabled = shouldEnable;
+                await optimizeCameraForText();
                 refreshTorchButton();
                 const message = shouldEnable ? 'Senter kamera dinyalakan.' : 'Senter kamera dimatikan.';
                 setStatus(message);
                 speakGuidance(message);
             } catch (error) {
                 console.info('Senter kamera tidak dapat diubah.', error);
+                torchAvailable = false;
                 const message = 'Senter kamera tidak dapat diubah pada perangkat ini.';
                 setStatus(message, 'error');
                 speakGuidance(message);
@@ -755,10 +751,18 @@
             );
         }
 
-        function renderOcrImage(source, sourceImageWidth, sourceImageHeight, maxOcrWidth, lightLevel = null) {
-            // Samakan area OCR dengan bingkai yang dilihat pengguna, bukan seluruh video.
-            const insetX = 0.05;
-            const insetY = 0.07;
+        function renderOcrImage(
+            source,
+            sourceImageWidth,
+            sourceImageHeight,
+            maxOcrWidth,
+            lightLevel = null,
+            { cropToGuide = true, enhance = true, targetCanvas = canvas } = {}
+        ) {
+            // Frame video dipotong sesuai bingkai. Foto resolusi tinggi memakai
+            // hampir seluruh halaman agar huruf di tepi tidak ikut terpotong.
+            const insetX = cropToGuide ? 0.05 : 0.005;
+            const insetY = cropToGuide ? 0.07 : 0.005;
             const sourceX = Math.floor(sourceImageWidth * insetX);
             const sourceY = Math.floor(sourceImageHeight * insetY);
             const sourceWidth = Math.floor(sourceImageWidth * (1 - (insetX * 2)));
@@ -766,30 +770,42 @@
             // Sedikit pembesaran membantu bila kamera hanya dapat menyediakan video HD.
             const scale = Math.min(1.5, maxOcrWidth / sourceWidth);
 
-            canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
-            canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
+            const outputWidth = Math.max(1, Math.floor(sourceWidth * scale));
+            const outputHeight = Math.max(1, Math.floor(sourceHeight * scale));
+            // Margin putih membantu pemisahan tepi halaman dan huruf yang
+            // berada dekat bingkai foto.
+            const border = Math.max(16, Math.round(Math.min(outputWidth, outputHeight) * 0.012));
 
-            const context = canvas.getContext('2d', { willReadFrequently: true });
+            targetCanvas.width = outputWidth + (border * 2);
+            targetCanvas.height = outputHeight + (border * 2);
+
+            const context = targetCanvas.getContext('2d', { willReadFrequently: true });
             context.imageSmoothingEnabled = true;
             context.imageSmoothingQuality = 'high';
-            context.filter = lightLevel !== null && lightLevel < 90
-                ? 'grayscale(1) contrast(1.75) brightness(1.28)'
-                : 'grayscale(1) contrast(1.42) brightness(1.08)';
+            context.fillStyle = '#fff';
+            context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
+            context.filter = enhance
+                ? (lightLevel !== null && lightLevel < 90
+                    ? 'grayscale(1) contrast(1.75) brightness(1.28)'
+                    : 'grayscale(1) contrast(1.42) brightness(1.08)')
+                : 'grayscale(1) contrast(1.08) brightness(1.02)';
             context.drawImage(
                 source,
                 sourceX,
                 sourceY,
                 sourceWidth,
                 sourceHeight,
-                0,
-                0,
-                canvas.width,
-                canvas.height
+                border,
+                border,
+                outputWidth,
+                outputHeight
             );
             context.filter = 'none';
-            enhanceDocumentImage(context, canvas.width, canvas.height);
+            if (enhance) {
+                enhanceDocumentImage(context, targetCanvas.width, targetCanvas.height);
+            }
 
-            return canvas;
+            return targetCanvas;
         }
 
         async function renderPhotoFile(file) {
@@ -799,7 +815,24 @@
 
             const bitmap = await createImageBitmap(file);
             try {
-                return renderOcrImage(bitmap, bitmap.width, bitmap.height, PHOTO_OCR_TARGET_WIDTH);
+                return {
+                    baseline: renderOcrImage(
+                        bitmap,
+                        bitmap.width,
+                        bitmap.height,
+                        PHOTO_OCR_TARGET_WIDTH,
+                        null,
+                        { cropToGuide: false, enhance: false, targetCanvas: baselineOcrCanvas }
+                    ),
+                    enhanced: renderOcrImage(
+                        bitmap,
+                        bitmap.width,
+                        bitmap.height,
+                        PHOTO_OCR_TARGET_WIDTH,
+                        null,
+                        { cropToGuide: false, enhance: true, targetCanvas: canvas }
+                    )
+                };
             } finally {
                 bitmap.close?.();
             }
@@ -886,8 +919,12 @@
         }
 
         function createAdaptiveDocumentCanvas(source) {
-            const width = source.width;
-            const height = source.height;
+            // Threshold lokal sangat membantu pada bayangan kertas, tetapi
+            // integral image berukuran penuh dapat menghabiskan memori ponsel.
+            // Versi 1600 px mempertahankan bentuk huruf sambil aman diproses.
+            const scale = Math.min(1, ADAPTIVE_OCR_TARGET_WIDTH / source.width);
+            const width = Math.max(1, Math.round(source.width * scale));
+            const height = Math.max(1, Math.round(source.height * scale));
             const pixelCount = width * height;
             const stride = width + 1;
             const localWindowRadius = Math.max(12, Math.min(48, Math.round(Math.min(width, height) * 0.012)));
@@ -896,7 +933,7 @@
             binaryCanvas.height = height;
 
             const context = binaryCanvas.getContext('2d', { willReadFrequently: true });
-            context.drawImage(source, 0, 0);
+            context.drawImage(source, 0, 0, width, height);
             const imageData = context.getImageData(0, 0, width, height);
             const { data } = imageData;
             const grayscale = new Uint8Array(pixelCount);
@@ -1063,7 +1100,8 @@
                 ).then(async (createdWorker) => {
                     await createdWorker.setParameters({
                         tessedit_pageseg_mode: '3',
-                        preserve_interword_spaces: '0'
+                        preserve_interword_spaces: '0',
+                        user_defined_dpi: '300'
                     });
                     worker = createdWorker;
                     return worker;
@@ -1089,12 +1127,26 @@
         }
 
         function normalizeOcrText(rawText) {
-            return rawText
-                // Jangan menggabungkan, mengganti, atau "membetulkan" kata.
-                // Area hasil harus menjadi salinan langsung keluaran OCR agar
-                // pengguna dapat menilai dan menyalinnya apa adanya.
-                .replace(/\r\n/g, '\n')
-                .trim();
+            // Jangan menggabungkan, mengganti, menghapus, atau "membetulkan"
+            // karakter. Area hasil adalah keluaran data.text dari OCR apa adanya.
+            return typeof rawText === 'string' ? rawText : '';
+        }
+
+        function getWordConfidenceValues(blocks) {
+            const confidences = [];
+
+            for (const block of blocks ?? []) {
+                for (const paragraph of block.paragraphs ?? []) {
+                    for (const line of paragraph.lines ?? []) {
+                        for (const word of line.words ?? []) {
+                            const confidence = Number(word.confidence);
+                            if (Number.isFinite(confidence)) confidences.push(confidence);
+                        }
+                    }
+                }
+            }
+
+            return confidences;
         }
 
         function createOcrCandidate(result) {
@@ -1103,16 +1155,13 @@
             const letters = (compactText.match(/[A-Za-zÀ-ÿ]/g) ?? []).length;
             const words = text.match(/[A-Za-zÀ-ÿ]{2,}/g) ?? [];
             const confidence = Number(result.data.confidence) || 0;
-            const recognizedWords = Array.isArray(result.data.words) ? result.data.words : [];
-            const wordConfidences = recognizedWords
-                .map((word) => Number(word.confidence))
-                .filter((wordConfidence) => Number.isFinite(wordConfidence));
+            const wordConfidences = getWordConfidenceValues(result.data.blocks);
             const wordConfidence = wordConfidences.length
                 ? wordConfidences.reduce((total, value) => total + value, 0) / wordConfidences.length
                 : confidence;
             const letterRatio = compactText.length ? letters / compactText.length : 0;
             const score = (confidence * 0.75)
-                + (wordConfidence * 0.15)
+                + (wordConfidence * 0.35)
                 + Math.min(25, letters / 10)
                 + Math.min(15, words.length * 1.5)
                 + (letterRatio * 10);
@@ -1140,35 +1189,40 @@
                 && candidate.letterRatio >= 0.35;
         }
 
-        async function recognizeBookPage(ocrWorker, frame, { allowAdaptive = true } = {}) {
-            const paragraphResult = await waitForOcrOperation(
-                ocrWorker.recognize(frame),
+        async function recognizeOcrCandidate(ocrWorker, source, pageSegmentationMode) {
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: String(pageSegmentationMode) });
+            const result = await waitForOcrOperation(
+                ocrWorker.recognize(source, {}, { blocks: true }),
                 OCR_RECOGNITION_TIMEOUT,
                 'Pembacaan teks terlalu lama. Coba luruskan halaman atau pindai lagi.'
             );
-            const paragraphCandidate = createOcrCandidate(paragraphResult);
+            const candidate = createOcrCandidate(result);
+            candidate.pageSegmentationMode = pageSegmentationMode;
+            return candidate;
+        }
 
-            // Satu kali OCR biasanya cukup untuk foto halaman yang baik. Threshold
-            // adaptif yang mahal hanya dipakai apabila hasil pertama memang buruk.
-            if (isUsefulOcrCandidate(paragraphCandidate) || !allowAdaptive) {
-                return paragraphCandidate;
-            }
+        function selectBestOcrCandidate(candidates) {
+            return candidates.reduce((best, candidate) => candidate.score > best.score ? candidate : best);
+        }
 
-            // Fallback khusus dokumen berbayang: threshold lokal memutihkan kertas
-            // secara adaptif, lalu mode otomatis memisahkan blok teks halaman.
-            const adaptiveFrame = createAdaptiveDocumentCanvas(frame);
-            await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
-            const documentResult = await waitForOcrOperation(
-                ocrWorker.recognize(adaptiveFrame),
-                OCR_RECOGNITION_TIMEOUT,
-                'Pembacaan teks terlalu lama. Coba luruskan halaman atau pindai lagi.'
-            );
+        async function recognizeBookPage(ocrWorker, photoFrames) {
+            const baselineFrame = photoFrames?.baseline ?? photoFrames;
+            const enhancedFrame = photoFrames?.enhanced ?? photoFrames;
+
+            // Mode akurasi tinggi: beberapa model tata letak dibandingkan atas
+            // foto yang sama. Yang ditampilkan tetap satu data.text mentah dari
+            // kandidat terbaik—bukan gabungan atau koreksi buatan aplikasi.
+            setStatus('Mencocokkan beberapa pembacaan halaman agar hasil lebih akurat. Mohon tunggu.');
+            const candidates = [];
+            candidates.push(await recognizeOcrCandidate(ocrWorker, baselineFrame, 3));
+            candidates.push(await recognizeOcrCandidate(ocrWorker, enhancedFrame, 4));
+
+            const adaptiveFrame = createAdaptiveDocumentCanvas(enhancedFrame);
+            candidates.push(await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 3));
+            candidates.push(await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 6));
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
-            const documentCandidate = createOcrCandidate(documentResult);
 
-            return documentCandidate.score > paragraphCandidate.score
-                ? documentCandidate
-                : paragraphCandidate;
+            return selectBestOcrCandidate(candidates);
         }
 
         function startRealtimeTextRecognition() {
@@ -1524,7 +1578,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memberi tahu ketika halaman siap dipindai. Tombol Pindai halaman membaca halaman yang terlihat. Hasil tetap tersimpan sampai Anda memakai tombol Refresh untuk memindai halaman baru. Jika kamera mendukungnya, tombol Senter tetap berada di kiri atas. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memberi tahu ketika halaman siap dipindai. Tombol Pindai halaman membaca halaman yang terlihat. Hasil tetap tersimpan sampai Anda memakai tombol Refresh untuk memindai halaman baru. Jika kamera mendukungnya, tombol Senter berada tepat di atas tombol Refresh. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
