@@ -302,7 +302,7 @@
 
     <main>
         <h1 class="sr-only">Bacara, pembaca buku melalui kamera</h1>
-        <p id="status" class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-mode="info">Panduan suara sedang disiapkan.</p>
+        <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">Panduan suara sedang disiapkan.</p>
 
         <div class="grid">
             <section class="panel" id="pemindai" aria-labelledby="judul-kamera">
@@ -392,6 +392,8 @@
         const MINIMUM_WORD_CONFIDENCE = 22;
         const MINIMUM_TEXT_LENGTH = 6;
         const MINIMUM_LETTER_COUNT = 4;
+        const OCR_START_TIMEOUT = 45000;
+        const OCR_RECOGNITION_TIMEOUT = 45000;
         const VIDEO_OCR_TARGET_WIDTH = 2048;
         const PHOTO_OCR_TARGET_WIDTH = 2560;
         const REQUIRED_STEADY_FRAME_SAMPLES = 3;
@@ -958,10 +960,42 @@
             };
         }
 
+        function waitForOcrOperation(operation, timeout, timeoutMessage) {
+            let timeoutId = null;
+
+            return Promise.race([
+                operation,
+                new Promise((_, reject) => {
+                    timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeout);
+                })
+            ]).finally(() => {
+                if (timeoutId !== null) window.clearTimeout(timeoutId);
+            });
+        }
+
+        function reportOcrProgress({ status, progress }) {
+            if (!status) return;
+
+            const percent = Number.isFinite(progress) ? ` ${Math.round(progress * 100)}%` : '';
+            if (status === 'recognizing text') {
+                setStatus(`Membaca teks halaman${percent}.`);
+                return;
+            }
+
+            if (status.includes('loading') || status.includes('initializing')) {
+                setStatus(`Menyiapkan pembaca teks${percent}. Koneksi internet diperlukan saat pertama kali digunakan.`);
+            }
+        }
+
         async function getWorker() {
             if (worker) return worker;
 
-            worker = await Tesseract.createWorker('ind+eng', 1);
+            setStatus('Menyiapkan pembaca teks. Koneksi internet diperlukan saat pertama kali digunakan.');
+            worker = await waitForOcrOperation(
+                Tesseract.createWorker('ind+eng', 1, { logger: reportOcrProgress }),
+                OCR_START_TIMEOUT,
+                'Pembaca teks terlalu lama dimuat. Periksa koneksi internet lalu coba pindai lagi.'
+            );
             await worker.setParameters({
                 tessedit_pageseg_mode: '6',
                 preserve_interword_spaces: '1'
@@ -1024,7 +1058,11 @@
         }
 
         async function recognizeBookPage(ocrWorker, frame, { thorough = false } = {}) {
-            const paragraphResult = await ocrWorker.recognize(frame);
+            const paragraphResult = await waitForOcrOperation(
+                ocrWorker.recognize(frame),
+                OCR_RECOGNITION_TIMEOUT,
+                'Pembacaan teks terlalu lama. Coba luruskan halaman atau pindai lagi.'
+            );
             const paragraphCandidate = createOcrCandidate(paragraphResult);
 
             if (!thorough && isUsefulOcrCandidate(paragraphCandidate)) {
@@ -1035,7 +1073,11 @@
             // secara adaptif, lalu mode otomatis memisahkan blok teks halaman.
             const adaptiveFrame = createAdaptiveDocumentCanvas(frame);
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
-            const documentResult = await ocrWorker.recognize(adaptiveFrame);
+            const documentResult = await waitForOcrOperation(
+                ocrWorker.recognize(adaptiveFrame),
+                OCR_RECOGNITION_TIMEOUT,
+                'Pembacaan teks terlalu lama. Coba luruskan halaman atau pindai lagi.'
+            );
             await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
             const documentCandidate = createOcrCandidate(documentResult);
 
@@ -1128,7 +1170,12 @@
                 setStatus('Teks diperbarui dari frame yang stabil dan tajam.', 'detected');
             } catch (error) {
                 console.error(error);
-                setStatus('Deteksi teks tidak dapat dijalankan. Periksa koneksi internet, lalu aktifkan kamera kembali.', 'error');
+                const message = error?.message || 'Deteksi teks tidak dapat dijalankan.';
+                if (message.includes('terlalu lama')) {
+                    worker?.terminate?.();
+                    worker = null;
+                }
+                setStatus(`${message} Periksa koneksi internet, lalu coba pindai lagi.`, 'error');
                 stopRealtimeTextRecognition();
             } finally {
                 scanning = false;
