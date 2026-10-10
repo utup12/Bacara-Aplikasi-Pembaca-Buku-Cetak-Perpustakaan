@@ -248,7 +248,7 @@
             align-items: center;
             justify-content: center;
             gap: 10px;
-            width: max-content;
+            width: min(calc(100% - 28px), 640px);
         }
 
         .speak-dock button {
@@ -257,7 +257,8 @@
         }
 
         .speak-dock .primary {
-            min-width: min(76vw, 360px);
+            min-width: 0;
+            flex: 1;
             font-size: 1.15rem;
         }
 
@@ -409,6 +410,7 @@
     <div class="speak-dock" role="group" aria-label="Kontrol pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
         <button id="hentikan-suara" type="button">Hentikan suara</button>
+        <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
     </div>
     <p class="sr-only" id="bantuan-baca">Tombol ini selalu berada di tengah bawah layar. Tekan untuk membacakan hasil teks yang terdeteksi.</p>
 
@@ -424,6 +426,7 @@
         const textArea = document.getElementById('hasil-teks');
         const speakButton = document.getElementById('baca');
         const stopSpeechButton = document.getElementById('hentikan-suara');
+        const refreshTextButton = document.getElementById('refresh-text');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
@@ -914,11 +917,22 @@
             window.speechSynthesis.speak(speech);
         }
 
+        function refreshText() {
+            speechSession += 1;
+            isReadingText = false;
+            window.speechSynthesis.cancel();
+            textArea.value = '';
+            detectionState = null;
+            setStatus('Hasil teks dikosongkan. Pemantauan teks berlanjut.');
+            textArea.focus();
+        }
+
         startButton.addEventListener('click', startCamera);
         scanButton.addEventListener('click', scanText);
         autoButton.addEventListener('click', toggleAutomaticScan);
         stopButton.addEventListener('click', stopCamera);
         speakButton.addEventListener('click', speakText);
+        refreshTextButton.addEventListener('click', refreshText);
         stopSpeechButton.addEventListener('click', () => {
             speechSession += 1;
             isReadingText = false;
