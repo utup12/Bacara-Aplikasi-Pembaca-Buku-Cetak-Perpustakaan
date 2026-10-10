@@ -21,9 +21,11 @@ Kemudian buka `http://127.0.0.1:8000`.
 
 ## Optimasi kamera
 
-- Pratinjau kamera memakai target 1280×720 pada 24 FPS.
-- OCR memproses area pemindaian di tengah, bukan keseluruhan frame.
-- Pemindaian otomatis menunggu OCR sebelumnya selesai supaya penggunaan CPU tidak menumpuk.
+- Kamera meminta resolusi hingga 2560×1440 jika perangkat mendukungnya.
+- Bingkai pemindaian membantu pengguna menempatkan satu halaman buku; OCR hanya membaca area tersebut.
+- Pemindaian otomatis menunggu tiga sampel frame yang stabil dan cukup tajam sebelum menjalankan OCR. Tombol **Pindai halaman** tersedia untuk memindai ulang secara manual.
+- Gambar dikonversi ke grayscale, dinormalisasi berdasarkan pencahayaan frame, dan diberi peningkatan kontras ringan sebelum dikirim ke OCR.
+- Hasil ber-confidence rendah tidak menggantikan teks yang sudah lebih baik, sehingga teks tidak mudah berubah menjadi hasil yang berantakan.
 
 ## Privasi
 
