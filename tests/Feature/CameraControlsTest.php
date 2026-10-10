@@ -27,6 +27,9 @@ class CameraControlsTest extends TestCase
             ->assertSee('const VIDEO_OCR_TARGET_WIDTH = 2048', false)
             ->assertSee('function optimizeCameraForText', false)
             ->assertSee('function recognizeBookPage', false)
+            ->assertSee('id="camera-instruction"', false)
+            ->assertSee('const CAMERA_FRAME_INSTRUCTION', false)
+            ->assertSee('speakGuidance(cameraReadyMessage)', false)
             ->assertSee('function configureIndonesianVoice', false);
     }
 
