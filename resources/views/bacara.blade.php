@@ -189,23 +189,6 @@
             border-color: #0b4f43;
         }
 
-        .hold-text-button {
-            position: fixed;
-            z-index: 30;
-            top: max(12px, env(safe-area-inset-top));
-            right: 12px;
-            min-height: 48px;
-            padding-inline: 16px;
-            background: var(--putih);
-            box-shadow: 0 3px 12px rgba(12, 48, 38, .25);
-        }
-
-        .hold-text-button[aria-pressed="true"] {
-            background: var(--kuning);
-            border-color: #6d5200;
-            color: #3d2e00;
-        }
-
         .torch-button {
             position: fixed;
             z-index: 30;
@@ -318,7 +301,6 @@
 <body>
     <a class="skip-link" href="#hasil-teks">Langsung ke hasil teks</a>
     <button class="torch-button" id="torch-toggle" type="button" aria-pressed="false" hidden>Nyalakan senter</button>
-    <button class="hold-text-button" id="hold-text" type="button" aria-pressed="false">Tahan teks</button>
 
     <main>
         <h1 class="sr-only">Bacara, pembaca buku melalui kamera</h1>
@@ -371,7 +353,6 @@
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const refreshTextButton = document.getElementById('refresh-text');
         const scanNowButton = document.getElementById('scan-now');
-        const holdTextButton = document.getElementById('hold-text');
         const torchToggleButton = document.getElementById('torch-toggle');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
@@ -393,7 +374,7 @@
         let lastDetectedConfidence = 0;
         let lastRecognitionState = '';
         let textEditedManually = false;
-        let textHeld = false;
+        let textLocked = false;
         let isReadingText = false;
         let speechSession = 0;
         let initialGuidancePlayed = false;
@@ -518,7 +499,7 @@
             cameraToggleButton.textContent = cameraOn ? 'Matikan kamera' : 'Aktifkan kamera';
             cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
             cameraToggleButton.classList.toggle('warning', cameraOn);
-            scanNowButton.disabled = !cameraOn || cameraStarting || scanning || scanRequestPending || textHeld;
+            scanNowButton.disabled = !cameraOn || cameraStarting || scanning || scanRequestPending || textLocked;
         }
 
         function refreshTorchButton() {
@@ -1192,7 +1173,7 @@
         }
 
         function startRealtimeTextRecognition() {
-            if (!stream || realtimeRecognitionActive || textHeld) return;
+            if (!stream || realtimeRecognitionActive || textLocked) return;
 
             realtimeRecognitionActive = true;
             resetFrameStability();
@@ -1211,7 +1192,7 @@
         }
 
         function scheduleRealtimeTextRecognition(delay = REALTIME_SCAN_DELAY) {
-            if (!realtimeRecognitionActive || !stream || textHeld) return;
+            if (!realtimeRecognitionActive || !stream || textLocked) return;
 
             realtimeScanTimer = window.setTimeout(async () => {
                 realtimeScanTimer = null;
@@ -1235,7 +1216,7 @@
             preparedFrame = null,
             fast = false
         } = {}) {
-            if (!stream || textHeld || scanning || video.readyState < 2) return;
+            if (!stream || textLocked || scanning || video.readyState < 2) return;
 
             scanning = true;
             setScanRequestPending(false);
@@ -1272,7 +1253,7 @@
                     }
                 }
 
-                if (!stream || textHeld || textEditedManually) return;
+                if (!stream || textLocked || textEditedManually) return;
 
                 if (!isUsefulOcrCandidate(candidate)) {
                     if (lastRecognitionState !== 'unclear') {
@@ -1295,6 +1276,7 @@
                 lastDetectedScore = candidate.score;
                 lastDetectedConfidence = candidate.confidence;
                 lastRecognitionState = 'detected';
+                textLocked = true;
                 announceScanProgress('Halaman siap. Teks berhasil terdeteksi. Tekan dua kali tombol Bacakan teks untuk membacakan.', 'detected');
             } catch (error) {
                 console.error(error);
@@ -1312,7 +1294,7 @@
         }
 
         async function recognizeTextInRealtime() {
-            if (!stream || !realtimeRecognitionActive || textHeld || scanning || video.readyState < 2) return;
+            if (!stream || !realtimeRecognitionActive || textLocked || scanning || video.readyState < 2) return;
 
             const quality = inspectFrameQuality();
             if (!quality) return;
@@ -1412,36 +1394,6 @@
             window.speechSynthesis.speak(speech);
         }
 
-        function refreshHoldTextButton() {
-            holdTextButton.textContent = textHeld ? 'Lanjutkan teks' : 'Tahan teks';
-            holdTextButton.setAttribute('aria-pressed', String(textHeld));
-        }
-
-        function setTextHeld(shouldHold) {
-            if (textHeld === shouldHold) return;
-
-            textHeld = shouldHold;
-            refreshHoldTextButton();
-
-            if (textHeld) {
-                stopRealtimeTextRecognition();
-                setStatus('Hasil teks ditahan. Teks tidak akan berubah sampai Anda melanjutkannya.');
-                return;
-            }
-
-            lastDetectedText = '';
-            lastDetectedScore = 0;
-            lastDetectedConfidence = 0;
-            lastRecognitionState = '';
-            textEditedManually = false;
-            setStatus('Pemindaian halaman dilanjutkan. Ketuk dua kali tombol Pindai halaman saat halaman siap.');
-            startRealtimeTextRecognition();
-        }
-
-        function toggleTextHold() {
-            setTextHeld(!textHeld);
-        }
-
         function stopSpeech() {
             speechSession += 1;
             isReadingText = false;
@@ -1461,14 +1413,15 @@
             lastDetectedConfidence = 0;
             lastRecognitionState = '';
             textEditedManually = false;
-            setStatus(textHeld
-                ? 'Hasil teks dikosongkan dan tetap ditahan.'
-                : 'Hasil teks dikosongkan. Siapkan halaman lalu ketuk dua kali tombol Pindai halaman.');
+            textLocked = false;
+            setStatus('Hasil teks dikosongkan. Siapkan halaman lalu ketuk dua kali tombol Pindai halaman.');
+            refreshCameraToggleButton();
+            startRealtimeTextRecognition();
         }
 
         async function scanCurrentPage() {
-            if (textHeld || textEditedManually) {
-                announceScanProgress('Lanjutkan atau refresh hasil teks terlebih dahulu sebelum memindai halaman baru.', 'error');
+            if (textLocked || textEditedManually) {
+                announceScanProgress('Hasil teks masih tersimpan. Ketuk dua kali tombol Refresh untuk memindai halaman baru.', 'error');
                 return;
             }
 
@@ -1576,7 +1529,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman mengambil foto resolusi penuh untuk hasil terbaik. Jika kamera mendukungnya, tombol Senter tetap berada di kiri atas. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memberi tahu ketika halaman siap dipindai. Tombol Pindai halaman membaca halaman yang terlihat. Hasil tetap tersimpan sampai Anda memakai tombol Refresh untuk memindai halaman baru. Jika kamera mendukungnya, tombol Senter tetap berada di kiri atas. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
@@ -1609,13 +1562,6 @@
             refreshText
         );
         attachDoubleActivation(
-            holdTextButton,
-            () => textHeld
-                ? 'Tombol Lanjutkan teks. Ketuk cepat dua kali agar hasil dipindai kembali ketika kamera stabil.'
-                : 'Tombol Tahan teks. Ketuk cepat dua kali agar hasil teks tidak berubah.',
-            toggleTextHold
-        );
-        attachDoubleActivation(
             torchToggleButton,
             () => torchEnabled
                 ? 'Tombol Matikan senter. Ketuk cepat dua kali untuk mematikan senter kamera.'
@@ -1629,7 +1575,8 @@
 
         textArea.addEventListener('input', () => {
             textEditedManually = true;
-            setTextHeld(true);
+            textLocked = true;
+            refreshCameraToggleButton();
         });
 
         window.addEventListener('pagehide', () => {
@@ -1644,7 +1591,6 @@
         });
 
         refreshCameraToggleButton();
-        refreshHoldTextButton();
 
         window.addEventListener('load', () => {
             window.setTimeout(playInitialGuidance, 250);
