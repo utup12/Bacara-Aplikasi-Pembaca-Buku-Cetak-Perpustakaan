@@ -44,6 +44,10 @@
 
         .skip-link:focus { top: 12px; }
 
+        .orientation-notice {
+            display: none;
+        }
+
         header {
             background: var(--hijau-gelap);
             color: white;
@@ -303,10 +307,42 @@
             .speak-dock .primary { min-width: 0; flex: 1; }
             .speak-dock button { padding-inline: 12px; }
         }
+
+        @media (orientation: landscape) and (max-height: 600px) {
+            header { padding: 12px 20px; }
+            main { padding-top: 16px; }
+            .intro { margin-bottom: 14px; }
+            .camera, video { min-height: 220px; }
+        }
+
+        @media (orientation: portrait) {
+            .orientation-notice {
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+                display: grid;
+                place-items: center;
+                padding: 24px;
+                background: #07372f;
+                color: #fff;
+                text-align: center;
+            }
+
+            .orientation-notice div { max-width: 420px; }
+            .orientation-notice strong { display: block; font-size: 1.5rem; }
+            .orientation-notice p { color: #d9ebe3; }
+        }
     </style>
 </head>
 <body>
     <a class="skip-link" href="#pemindai">Langsung ke pemindai</a>
+
+    <div class="orientation-notice" id="orientation-notice" role="alert" aria-live="assertive">
+        <div>
+            <strong>Putar perangkat ke posisi horizontal.</strong>
+            <p>Bacara hanya digunakan dalam mode landscape agar kamera dan tombol pembacaan mudah dijangkau.</p>
+        </div>
+    </div>
 
     <header>
         <div class="header-content">
@@ -453,6 +489,50 @@
             startButton.disabled = cameraOn;
         }
 
+        function isPortraitOrientation() {
+            return window.matchMedia('(orientation: portrait)').matches;
+        }
+
+        async function requestLandscapeMode() {
+            if (!window.screen?.orientation || typeof window.screen.orientation.lock !== 'function') return;
+
+            try {
+                await window.screen.orientation.lock('landscape');
+            } catch (error) {
+                // Sebagian browser hanya mengizinkan lock pada mode layar penuh.
+                // Layar instruksi CSS di portrait tetap memastikan Bacara hanya dipakai horizontal.
+                console.info('Kunci orientasi tidak tersedia pada browser ini.', error);
+            }
+        }
+
+        let portraitNoticeActive = false;
+
+        function requireLandscapeMode() {
+            if (!isPortraitOrientation()) {
+                portraitNoticeActive = false;
+                return true;
+            }
+
+            if (!portraitNoticeActive) {
+                const message = 'Putar perangkat ke posisi horizontal untuk menggunakan Bacara.';
+                setStatus(message, 'error');
+                speakGuidance(message);
+                portraitNoticeActive = true;
+            }
+
+            return false;
+        }
+
+        function handleOrientationChange() {
+            if (!isPortraitOrientation()) {
+                portraitNoticeActive = false;
+                return;
+            }
+
+            if (stream) stopCamera();
+            requireLandscapeMode();
+        }
+
         async function startCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setStatus('Kamera memerlukan browser modern dan alamat HTTPS atau localhost.', 'error');
@@ -460,6 +540,10 @@
             }
 
             try {
+                await requestLandscapeMode();
+
+                if (!requireLandscapeMode()) return;
+
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: 'environment' },
@@ -715,6 +799,9 @@
                 worker.terminate();
             }
         });
+
+        window.addEventListener('orientationchange', handleOrientationChange);
+        window.addEventListener('resize', handleOrientationChange);
 
         refreshButtons();
     </script>
