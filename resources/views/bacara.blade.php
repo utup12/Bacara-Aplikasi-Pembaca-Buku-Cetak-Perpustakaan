@@ -22,6 +22,7 @@
 
         body {
             margin: 0;
+            padding-bottom: 104px;
             background: var(--krem);
             color: var(--teks);
             font-family: Arial, Helvetica, sans-serif;
@@ -166,7 +167,7 @@
             appearance: none;
             border: 2px solid var(--hijau);
             border-radius: 9px;
-            min-height: 48px;
+            min-height: 56px;
             padding: 10px 14px;
             background: white;
             color: var(--hijau-gelap);
@@ -202,6 +203,7 @@
         #status {
             min-height: 52px;
             padding: 12px;
+            border: 2px solid #9dac9f;
             border-radius: 8px;
             background: #eef2ef;
             color: #24352d;
@@ -211,6 +213,48 @@
         #status[data-mode="error"] {
             color: #7c150f;
             background: #ffebe9;
+            border-color: #b42318;
+        }
+
+        #status[data-mode="detected"] {
+            color: #07372f;
+            background: #d9f5e6;
+            border-color: #0b4f43;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .speak-dock {
+            position: fixed;
+            z-index: 20;
+            left: 50%;
+            bottom: max(16px, env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: max-content;
+        }
+
+        .speak-dock button {
+            min-height: 64px;
+            box-shadow: 0 4px 16px rgba(7, 55, 47, .28);
+        }
+
+        .speak-dock .primary {
+            min-width: min(76vw, 360px);
+            font-size: 1.15rem;
         }
 
         textarea {
@@ -255,6 +299,9 @@
             .panel { padding: 16px; }
             main { padding: 22px 14px 40px; }
             header { padding: 18px 14px; }
+            .speak-dock { width: calc(100% - 28px); }
+            .speak-dock .primary { min-width: 0; flex: 1; }
+            .speak-dock button { padding-inline: 12px; }
         }
     </style>
 </head>
@@ -280,14 +327,14 @@
             <p class="privacy"><strong>Privasi:</strong> gambar buku diproses langsung di browser. Bacara tidak menyimpan foto atau teks Anda ke database.</p>
         </section>
 
-        <p id="status" role="status" aria-live="polite" data-mode="info">
+        <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">
             Tekan “Aktifkan kamera” untuk memulai.
         </p>
 
         <div class="grid">
             <section class="panel" id="pemindai" aria-labelledby="judul-kamera">
                 <h2 id="judul-kamera">1. Pindai halaman</h2>
-                <p>Pastikan teks terang, lurus, dan memenuhi kotak kuning.</p>
+                <p>Pastikan teks terang, lurus, dan memenuhi kotak kuning. Setelah kamera aktif, Bacara memantau teks secara otomatis dan memberi panduan suara saat status berubah.</p>
 
                 <div class="camera">
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
@@ -298,8 +345,8 @@
 
                 <div class="actions">
                     <button class="primary" id="start-camera" type="button">Aktifkan kamera</button>
-                    <button id="scan" type="button" disabled>Pindai teks sekarang</button>
-                    <button id="auto-scan" type="button" disabled>Pindai otomatis: mati</button>
+                    <button id="scan" type="button" disabled aria-label="Pindai teks satu kali sekarang">Pindai sekali</button>
+                    <button id="auto-scan" type="button" disabled>Pemantauan teks: mati</button>
                     <button class="warning" id="stop-camera" type="button" disabled>Matikan kamera</button>
                 </div>
             </section>
@@ -315,10 +362,6 @@
                 <label for="kecepatan">Kecepatan suara: <output id="nilai-kecepatan">0.9</output></label>
                 <input id="kecepatan" type="range" min="0.6" max="1.3" step="0.1" value="0.9">
 
-                <div class="actions">
-                    <button class="primary" id="baca" type="button">Bacakan teks</button>
-                    <button id="hentikan-suara" type="button">Hentikan suara</button>
-                </div>
             </section>
         </div>
     </main>
@@ -326,6 +369,12 @@
     <footer>Bacara MVP · OCR Bahasa Indonesia dan Text-to-Speech di perangkat</footer>
 
     <canvas id="canvas" hidden></canvas>
+
+    <div class="speak-dock" role="group" aria-label="Kontrol pembacaan teks">
+        <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
+        <button id="hentikan-suara" type="button">Hentikan suara</button>
+    </div>
+    <p class="sr-only" id="bantuan-baca">Tombol ini selalu berada di tengah bawah layar. Tekan untuk membacakan hasil teks yang terdeteksi.</p>
 
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
     <script>
@@ -347,10 +396,53 @@
         let scanning = false;
         let autoTimer = null;
         let autoScanEnabled = false;
+        let detectionState = null;
+        let lastProgressUpdate = -25;
+        let isReadingText = false;
+        let speechSession = 0;
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
             statusBox.dataset.mode = mode;
+        }
+
+        function getIndonesianVoice() {
+            return window.speechSynthesis
+                .getVoices()
+                .find((voice) => voice.lang.toLowerCase().startsWith('id'));
+        }
+
+        function speakGuidance(message) {
+            if (isReadingText || !('speechSynthesis' in window)) return;
+
+            const guidance = new SpeechSynthesisUtterance(message);
+            const indonesianVoice = getIndonesianVoice();
+
+            if (indonesianVoice) {
+                guidance.voice = indonesianVoice;
+                guidance.lang = indonesianVoice.lang;
+            } else {
+                guidance.lang = 'id-ID';
+            }
+
+            guidance.rate = 1;
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(guidance);
+        }
+
+        function reportDetection(hasText) {
+            const nextState = hasText ? 'detected' : 'missing';
+
+            // Hindari suara berulang saat kamera masih melihat halaman yang sama.
+            if (detectionState === nextState) return;
+
+            detectionState = nextState;
+            const message = hasText
+                ? 'Teks terdeteksi.'
+                : 'Tulisan belum terdeteksi. Arahkan kamera lebih dekat ke halaman buku.';
+
+            setStatus(message, hasText ? 'detected' : 'error');
+            speakGuidance(message);
         }
 
         function refreshButtons() {
@@ -380,8 +472,10 @@
 
                 video.srcObject = stream;
                 await video.play();
-                setStatus('Kamera aktif dalam mode hemat. Arahkan teks ke kotak kuning, lalu tekan “Pindai teks sekarang”.');
+                detectionState = null;
+                setStatus('Kamera aktif. Pemantauan teks dimulai otomatis.');
                 refreshButtons();
+                startAutomaticScan();
             } catch (error) {
                 setStatus('Kamera tidak dapat diakses. Izinkan akses kamera di browser, lalu coba lagi.', 'error');
                 console.error(error);
@@ -395,11 +489,12 @@
                 window.clearTimeout(autoTimer);
                 autoTimer = null;
             }
-            autoButton.textContent = 'Pindai otomatis: mati';
+            autoButton.textContent = 'Pemantauan teks: mati';
         }
 
         function stopCamera() {
             stopAutomaticScan();
+            detectionState = null;
 
             if (stream) {
                 stream.getTracks().forEach((track) => track.stop());
@@ -455,7 +550,10 @@
                 logger: (progress) => {
                     if (progress.status === 'recognizing text') {
                         const percent = Math.round(progress.progress * 100);
-                        setStatus(`Membaca teks… ${percent}%`);
+                        if (percent === 100 || percent - lastProgressUpdate >= 25) {
+                            lastProgressUpdate = percent;
+                            setStatus(`Membaca teks… ${percent}%`);
+                        }
                     }
                 }
             });
@@ -475,12 +573,12 @@
             if (scanning) return;
 
             scanning = true;
-            const startedAt = performance.now();
             refreshButtons();
 
             try {
                 const ocrWorker = await getWorker();
                 const frame = captureFrame();
+                lastProgressUpdate = -25;
                 setStatus('Membaca teks dari halaman buku…');
 
                 const result = await ocrWorker.recognize(frame);
@@ -490,13 +588,12 @@
                     .trim();
 
                 if (!cleanText) {
-                    setStatus('Teks belum terbaca. Dekatkan kamera, perbaiki pencahayaan, lalu coba lagi.', 'error');
+                    reportDetection(false);
                     return;
                 }
 
                 textArea.value = cleanText;
-                const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-                setStatus(`Teks berhasil dibaca dalam ${elapsedSeconds} detik. Ditemukan ${cleanText.length} karakter.`);
+                reportDetection(true);
             } catch (error) {
                 console.error(error);
                 setStatus('Pemindaian gagal. Pastikan koneksi internet tersedia saat pemindaian pertama.', 'error');
@@ -506,19 +603,30 @@
             }
         }
 
+        function startAutomaticScan() {
+            if (!stream || autoScanEnabled) return;
+
+            autoScanEnabled = true;
+            autoButton.textContent = 'Pemantauan teks: aktif';
+            autoTimer = window.setTimeout(async () => {
+                autoTimer = null;
+                await scanText();
+                scheduleAutomaticScan();
+            }, 500);
+        }
+
         function toggleAutomaticScan() {
             if (!stream) return;
 
             if (autoScanEnabled) {
                 stopAutomaticScan();
-                setStatus('Pemindaian otomatis dihentikan.');
+                setStatus('Pemantauan teks dihentikan.');
                 return;
             }
 
-            autoScanEnabled = true;
-            autoButton.textContent = 'Pindai otomatis: aktif';
-            setStatus('Pemindaian otomatis aktif; pemindaian berikutnya dimulai 6,5 detik setelah OCR selesai.');
-            scanText().finally(scheduleAutomaticScan);
+            detectionState = null;
+            startAutomaticScan();
+            setStatus('Pemantauan teks diaktifkan.');
         }
 
         function scheduleAutomaticScan() {
@@ -529,14 +637,16 @@
                 autoTimer = null;
                 await scanText();
                 scheduleAutomaticScan();
-            }, 6500);
+            }, 5000);
         }
 
         function speakText() {
             const text = textArea.value.trim();
 
             if (!text) {
-                setStatus('Belum ada teks untuk dibacakan.', 'error');
+                const message = 'Belum ada teks untuk dibacakan.';
+                setStatus(message, 'error');
+                speakGuidance(message);
                 return;
             }
 
@@ -545,12 +655,13 @@
                 return;
             }
 
+            stopAutomaticScan();
+            isReadingText = true;
+            const currentSpeechSession = ++speechSession;
             window.speechSynthesis.cancel();
 
             const speech = new SpeechSynthesisUtterance(text);
-            const indonesianVoice = window.speechSynthesis
-                .getVoices()
-                .find((voice) => voice.lang.toLowerCase().startsWith('id'));
+            const indonesianVoice = getIndonesianVoice();
 
             if (indonesianVoice) {
                 speech.voice = indonesianVoice;
@@ -561,8 +672,20 @@
 
             speech.rate = Number(rate.value);
             speech.onstart = () => setStatus('Bacara sedang membacakan teks.');
-            speech.onend = () => setStatus('Pembacaan selesai.');
-            speech.onerror = () => setStatus('Suara tidak dapat diputar. Coba lagi.', 'error');
+            speech.onend = () => {
+                if (currentSpeechSession !== speechSession) return;
+
+                isReadingText = false;
+                setStatus('Pembacaan selesai. Pemantauan teks dilanjutkan.');
+                startAutomaticScan();
+            };
+            speech.onerror = () => {
+                if (currentSpeechSession !== speechSession) return;
+
+                isReadingText = false;
+                setStatus('Suara tidak dapat diputar. Coba lagi.', 'error');
+                startAutomaticScan();
+            };
 
             window.speechSynthesis.speak(speech);
         }
@@ -573,8 +696,11 @@
         stopButton.addEventListener('click', stopCamera);
         speakButton.addEventListener('click', speakText);
         stopSpeechButton.addEventListener('click', () => {
+            speechSession += 1;
+            isReadingText = false;
             window.speechSynthesis.cancel();
-            setStatus('Pembacaan dihentikan.');
+            setStatus('Pembacaan dihentikan. Pemantauan teks dilanjutkan.');
+            startAutomaticScan();
         });
 
         rate.addEventListener('input', () => {
