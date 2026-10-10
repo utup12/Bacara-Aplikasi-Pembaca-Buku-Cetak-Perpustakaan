@@ -142,31 +142,6 @@
             object-fit: cover;
         }
 
-        .scan-frame {
-            position: absolute;
-            inset: 10%;
-            border: 3px solid var(--kuning);
-            border-radius: 8px;
-            pointer-events: none;
-        }
-
-        .scan-frame span {
-            position: absolute;
-            bottom: -38px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: max-content;
-            color: white;
-            font-size: .88rem;
-        }
-
-        .actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 14px;
-        }
-
         button {
             appearance: none;
             border: 2px solid var(--hijau);
@@ -309,6 +284,10 @@
             .speak-dock button { padding-inline: 12px; }
         }
 
+        @media (orientation: landscape) {
+            .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+
         @media (orientation: landscape) and (max-height: 600px) {
             header { padding: 12px 20px; }
             main { padding-top: 16px; }
@@ -360,40 +339,30 @@
     <main>
         <section class="intro" aria-labelledby="judul-pengantar">
             <h2 id="judul-pengantar">Baca teks buku dengan kamera</h2>
-            <p>Arahkan kamera ke halaman buku, pindai teks, lalu dengarkan hasilnya. Dirancang untuk penggunaan ponsel dan pembaca layar.</p>
+            <p>Arahkan kamera ke halaman buku, lalu ketik atau tempel teks untuk dibacakan. Dirancang untuk penggunaan ponsel dan pembaca layar.</p>
             <p class="privacy"><strong>Privasi:</strong> gambar buku diproses langsung di browser. Bacara tidak menyimpan foto atau teks Anda ke database.</p>
         </section>
 
         <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">
-            Kamera akan disiapkan otomatis. Izinkan akses jika diminta browser.
+            Tekan “Aktifkan kamera” untuk memulai.
         </p>
 
         <div class="grid">
             <section class="panel" id="pemindai" aria-labelledby="judul-kamera">
-                <h2 id="judul-kamera">1. Pindai halaman</h2>
-                <p>Pastikan teks terang, lurus, dan memenuhi kotak kuning. Setelah kamera aktif, Bacara memantau teks secara otomatis dan memberi panduan suara saat status berubah.</p>
+                <h2 id="judul-kamera">1. Kamera</h2>
+                <p>Aktifkan kamera dari tombol kontrol di bawah untuk melihat halaman buku.</p>
 
                 <div class="camera">
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
-                    <div class="scan-frame" aria-hidden="true">
-                        <span>Arahkan teks di dalam kotak</span>
-                    </div>
-                </div>
-
-                <div class="actions">
-                    <button class="primary" id="start-camera" type="button">Aktifkan kamera</button>
-                    <button id="scan" type="button" disabled aria-label="Pindai teks satu kali sekarang">Pindai sekali</button>
-                    <button id="auto-scan" type="button" disabled>Pemantauan teks: mati</button>
-                    <button class="warning" id="stop-camera" type="button" disabled>Matikan kamera</button>
                 </div>
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
-                <h2 id="judul-teks">2. Dengarkan teks</h2>
-                <p>Periksa atau perbaiki hasil pemindaian sebelum membacakannya.</p>
+                <h2 id="judul-teks">2. Hasil teks</h2>
+                <p>Ketik atau tempel teks yang ingin dibacakan.</p>
 
                 <label for="hasil-teks">Hasil teks</label>
-                <textarea id="hasil-teks" placeholder="Hasil OCR akan muncul di sini." aria-describedby="bantuan-teks"></textarea>
+                <textarea id="hasil-teks" placeholder="Ketik atau tempel teks di sini." aria-describedby="bantuan-teks"></textarea>
                 <p class="small" id="bantuan-teks">Anda dapat mengedit teks dengan keyboard atau pembaca layar.</p>
 
                 <label for="kecepatan">Kecepatan suara: <output id="nilai-kecepatan">0.9</output></label>
@@ -403,28 +372,22 @@
         </div>
     </main>
 
-    <footer>Bacara MVP · OCR Bahasa Indonesia dan Text-to-Speech di perangkat</footer>
+    <footer>Bacara MVP · Kamera dan Text-to-Speech di perangkat</footer>
 
-    <canvas id="canvas" hidden></canvas>
-
-    <div class="speak-dock" role="group" aria-label="Kontrol pembacaan teks">
+    <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
+        <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
         <button id="hentikan-suara" type="button">Hentikan suara</button>
         <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
     </div>
     <p class="sr-only" id="bantuan-baca">Tombol ini selalu berada di tengah bawah layar. Tekan untuk membacakan hasil teks yang terdeteksi.</p>
 
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
         const statusBox = document.getElementById('status');
-        const startButton = document.getElementById('start-camera');
-        const scanButton = document.getElementById('scan');
-        const autoButton = document.getElementById('auto-scan');
-        const stopButton = document.getElementById('stop-camera');
         const textArea = document.getElementById('hasil-teks');
         const speakButton = document.getElementById('baca');
+        const cameraToggleButton = document.getElementById('camera-toggle');
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const refreshTextButton = document.getElementById('refresh-text');
         const rate = document.getElementById('kecepatan');
@@ -433,12 +396,6 @@
 
         let stream = null;
         let cameraStarting = false;
-        let worker = null;
-        let scanning = false;
-        let autoTimer = null;
-        let autoScanEnabled = false;
-        let detectionState = null;
-        let lastProgressUpdate = -25;
         let isReadingText = false;
         let speechSession = 0;
         let lightTimer = null;
@@ -477,27 +434,12 @@
             window.speechSynthesis.speak(guidance);
         }
 
-        function reportDetection(hasText) {
-            const nextState = hasText ? 'detected' : 'missing';
-
-            // Hindari suara berulang saat kamera masih melihat halaman yang sama.
-            if (detectionState === nextState) return;
-
-            detectionState = nextState;
-            const message = hasText
-                ? 'Teks terdeteksi.'
-                : 'Tulisan belum terdeteksi. Arahkan kamera lebih dekat ke halaman buku.';
-
-            setStatus(message, hasText ? 'detected' : 'error');
-            speakGuidance(message);
-        }
-
-        function refreshButtons() {
+        function refreshCameraToggleButton() {
             const cameraOn = stream !== null;
-            scanButton.disabled = !cameraOn || scanning;
-            autoButton.disabled = !cameraOn;
-            stopButton.disabled = !cameraOn;
-            startButton.disabled = cameraOn || cameraStarting;
+            cameraToggleButton.disabled = cameraStarting;
+            cameraToggleButton.textContent = cameraOn ? 'Matikan kamera' : 'Aktifkan kamera';
+            cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
+            cameraToggleButton.classList.toggle('warning', cameraOn);
         }
 
         function isPortraitOrientation() {
@@ -554,7 +496,7 @@
 
             cameraStarting = true;
             setStatus('Menyiapkan kamera. Izinkan akses jika diminta browser.');
-            refreshButtons();
+            refreshCameraToggleButton();
 
             try {
                 await requestLandscapeMode();
@@ -580,34 +522,20 @@
 
                 video.srcObject = stream;
                 await video.play();
-                detectionState = null;
-                setStatus('Kamera aktif. Pemantauan teks dimulai otomatis.');
-                refreshButtons();
+                setStatus('Kamera aktif.');
+                refreshCameraToggleButton();
                 startLightMonitor();
-                startAutomaticScan();
             } catch (error) {
                 setStatus('Kamera tidak dapat diakses. Izinkan akses kamera di browser, lalu coba lagi.', 'error');
                 console.error(error);
             } finally {
                 cameraStarting = false;
-                refreshButtons();
+                refreshCameraToggleButton();
             }
-        }
-
-        function stopAutomaticScan() {
-            autoScanEnabled = false;
-
-            if (autoTimer !== null) {
-                window.clearTimeout(autoTimer);
-                autoTimer = null;
-            }
-            autoButton.textContent = 'Pemantauan teks: mati';
         }
 
         function stopCamera() {
-            stopAutomaticScan();
             stopLightMonitor();
-            detectionState = null;
 
             if (stream) {
                 stream.getTracks().forEach((track) => track.stop());
@@ -616,7 +544,16 @@
 
             video.srcObject = null;
             setStatus('Kamera dimatikan.');
-            refreshButtons();
+            refreshCameraToggleButton();
+        }
+
+        function toggleCamera() {
+            if (stream) {
+                stopCamera();
+                return;
+            }
+
+            startCamera();
         }
 
         function getVideoTrack() {
@@ -707,81 +644,6 @@
             isMeasuringLight = false;
         }
 
-        function captureFrame() {
-            if (!video.videoWidth || !video.videoHeight) {
-                throw new Error('Ukuran video belum tersedia.');
-            }
-
-            // Samakan area OCR dengan kotak kuning agar worker tidak membaca seluruh frame kamera.
-            const inset = 0.10;
-            const sourceX = Math.floor(video.videoWidth * inset);
-            const sourceY = Math.floor(video.videoHeight * inset);
-            const sourceWidth = Math.floor(video.videoWidth * (1 - (inset * 2)));
-            const sourceHeight = Math.floor(video.videoHeight * (1 - (inset * 2)));
-            const maxOcrWidth = 1280;
-            const scale = Math.min(1, maxOcrWidth / sourceWidth);
-
-            canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
-            canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
-
-            const lightLevel = estimateLightLevel();
-            const context = canvas.getContext('2d', { willReadFrequently: true });
-            context.filter = lightLevel !== null && lightLevel < 90
-                ? 'grayscale(1) contrast(1.85) brightness(1.22)'
-                : 'grayscale(1) contrast(1.45)';
-            context.drawImage(
-                video,
-                sourceX,
-                sourceY,
-                sourceWidth,
-                sourceHeight,
-                0,
-                0,
-                canvas.width,
-                canvas.height
-            );
-            context.filter = 'none';
-
-            return canvas;
-        }
-
-        async function getWorker() {
-            if (worker) return worker;
-
-            setStatus('Menyiapkan mesin OCR Bahasa Indonesia. Pemindaian pertama mungkin sedikit lebih lama.');
-
-            worker = await Tesseract.createWorker('ind+eng', 1, {
-                logger: (progress) => {
-                    if (progress.status === 'recognizing text') {
-                        const percent = Math.round(progress.progress * 100);
-                        if (percent === 100 || percent - lastProgressUpdate >= 25) {
-                            lastProgressUpdate = percent;
-                            setStatus(`Membaca teks… ${percent}%`);
-                        }
-                    }
-                }
-            });
-
-            // Mode blok teks tetap cepat, sambil mempertahankan spasi, angka, tanda baca, dan simbol daftar.
-            await worker.setParameters({
-                tessedit_pageseg_mode: '6',
-                preserve_interword_spaces: '1'
-            });
-
-            return worker;
-        }
-
-        function normalizeOcrText(rawText) {
-            return rawText
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n')
-                // Samakan variasi ikon daftar agar mudah dibaca oleh pembaca layar.
-                .replace(/^([ \t]*)([\u2022\u25CF\u25CB\u25E6\u25AA\u25AB\u25A0\u25A1\u25C6\u25C7])\s*/gm, '$1\u2022 ')
-                .replace(/^([ \t]*)(\d+)\s*[\)\]]\s*/gm, '$1$2. ')
-                .replace(/^([ \t]*)([A-Za-z])\s*[\)\]]\s*/gm, '$1$2. ')
-                .trim();
-        }
-
         function makeTextSpeakable(text) {
             return text
                 .replace(/^([ \t]*)\u2022\s*/gm, '$1Poin. ')
@@ -792,79 +654,6 @@
                 .replace(/\u2190/g, ' panah kiri ')
                 .replace(/\u2191/g, ' panah atas ')
                 .replace(/\u2193/g, ' panah bawah ');
-        }
-
-        async function scanText() {
-            if (!stream || video.readyState < 2) {
-                setStatus('Aktifkan kamera terlebih dahulu.', 'error');
-                return;
-            }
-
-            if (scanning) return;
-
-            scanning = true;
-            refreshButtons();
-
-            try {
-                const ocrWorker = await getWorker();
-                const frame = captureFrame();
-                lastProgressUpdate = -25;
-                setStatus('Membaca teks dari halaman buku…');
-
-                const result = await ocrWorker.recognize(frame);
-                const cleanText = normalizeOcrText(result.data.text);
-
-                if (!cleanText) {
-                    reportDetection(false);
-                    return;
-                }
-
-                textArea.value = cleanText;
-                reportDetection(true);
-            } catch (error) {
-                console.error(error);
-                setStatus('Pemindaian gagal. Pastikan koneksi internet tersedia saat pemindaian pertama.', 'error');
-            } finally {
-                scanning = false;
-                refreshButtons();
-            }
-        }
-
-        function startAutomaticScan() {
-            if (!stream || autoScanEnabled) return;
-
-            autoScanEnabled = true;
-            autoButton.textContent = 'Pemantauan teks: aktif';
-            autoTimer = window.setTimeout(async () => {
-                autoTimer = null;
-                await scanText();
-                scheduleAutomaticScan();
-            }, 500);
-        }
-
-        function toggleAutomaticScan() {
-            if (!stream) return;
-
-            if (autoScanEnabled) {
-                stopAutomaticScan();
-                setStatus('Pemantauan teks dihentikan.');
-                return;
-            }
-
-            detectionState = null;
-            startAutomaticScan();
-            setStatus('Pemantauan teks diaktifkan.');
-        }
-
-        function scheduleAutomaticScan() {
-            if (!autoScanEnabled || !stream) return;
-
-            // Hindari scan berikutnya menumpuk saat OCR sebelumnya masih memakai CPU.
-            autoTimer = window.setTimeout(async () => {
-                autoTimer = null;
-                await scanText();
-                scheduleAutomaticScan();
-            }, 5000);
         }
 
         function speakText() {
@@ -882,7 +671,6 @@
                 return;
             }
 
-            stopAutomaticScan();
             isReadingText = true;
             const currentSpeechSession = ++speechSession;
             window.speechSynthesis.cancel();
@@ -903,15 +691,13 @@
                 if (currentSpeechSession !== speechSession) return;
 
                 isReadingText = false;
-                setStatus('Pembacaan selesai. Pemantauan teks dilanjutkan.');
-                startAutomaticScan();
+                setStatus('Pembacaan selesai.');
             };
             speech.onerror = () => {
                 if (currentSpeechSession !== speechSession) return;
 
                 isReadingText = false;
                 setStatus('Suara tidak dapat diputar. Coba lagi.', 'error');
-                startAutomaticScan();
             };
 
             window.speechSynthesis.speak(speech);
@@ -922,23 +708,18 @@
             isReadingText = false;
             window.speechSynthesis.cancel();
             textArea.value = '';
-            detectionState = null;
-            setStatus('Hasil teks dikosongkan. Pemantauan teks berlanjut.');
+            setStatus('Hasil teks dikosongkan.');
             textArea.focus();
         }
 
-        startButton.addEventListener('click', startCamera);
-        scanButton.addEventListener('click', scanText);
-        autoButton.addEventListener('click', toggleAutomaticScan);
-        stopButton.addEventListener('click', stopCamera);
         speakButton.addEventListener('click', speakText);
+        cameraToggleButton.addEventListener('click', toggleCamera);
         refreshTextButton.addEventListener('click', refreshText);
         stopSpeechButton.addEventListener('click', () => {
             speechSession += 1;
             isReadingText = false;
             window.speechSynthesis.cancel();
-            setStatus('Pembacaan dihentikan. Pemantauan teks dilanjutkan.');
-            startAutomaticScan();
+            setStatus('Pembacaan dihentikan.');
         });
 
         rate.addEventListener('input', () => {
@@ -948,19 +729,12 @@
         window.addEventListener('pagehide', () => {
             stopCamera();
             window.speechSynthesis.cancel();
-
-            if (worker) {
-                worker.terminate();
-            }
         });
 
         window.addEventListener('orientationchange', handleOrientationChange);
         window.addEventListener('resize', handleOrientationChange);
 
-        refreshButtons();
-        document.addEventListener('DOMContentLoaded', () => {
-            if (requireLandscapeMode()) startCamera();
-        }, { once: true });
+        refreshCameraToggleButton();
     </script>
 </body>
 </html>
