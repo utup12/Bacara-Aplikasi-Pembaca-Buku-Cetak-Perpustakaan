@@ -23,7 +23,8 @@ class CameraControlsTest extends TestCase
             ->assertSee('startRealtimeTextRecognition()', false)
             ->assertSee('const REALTIME_SCAN_DELAY = 500', false)
             ->assertSee('const MINIMUM_OCR_CONFIDENCE = 26', false)
-            ->assertSee('const OCR_START_TIMEOUT = 45000', false)
+            ->assertSee('const OCR_START_TIMEOUT = 60000', false)
+            ->assertSee('const OCR_RECOGNITION_TIMEOUT = 60000', false)
             ->assertSee('const VIDEO_OCR_TARGET_WIDTH = 2048', false)
             ->assertSee('function optimizeCameraForText', false)
             ->assertSee('function recognizeBookPage', false)
@@ -33,6 +34,10 @@ class CameraControlsTest extends TestCase
             ->assertSee('Halaman siap dipindai. Ketuk dua kali tombol Pindai halaman.', false)
             ->assertSee('photo-capture', false)
             ->assertSee('preserve_interword_spaces: \'0\'', false)
+            ->assertSee('user_defined_dpi: \'300\'', false)
+            ->assertSee('worker.recognize(source, {}, { blocks: true })', false)
+            ->assertSee('function getWordConfidenceValues', false)
+            ->assertSee('function selectBestOcrCandidate', false)
             ->assertSee('function configureIndonesianVoice', false);
     }
 
@@ -50,6 +55,8 @@ class CameraControlsTest extends TestCase
             ->assertSee('id="torch-toggle"', false)
             ->assertSee('speak-dock-wrap', false)
             ->assertSee('bottom: calc(100% + 10px)', false)
+            ->assertSee('function getTorchCapabilities', false)
+            ->assertSee('values.includes(true)', false)
             ->assertSee('function toggleTorch', false)
             ->assertSee('function attachDoubleActivation', false)
             ->assertSee('function waitForOcrOperation', false)
