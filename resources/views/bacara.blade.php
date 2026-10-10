@@ -44,78 +44,24 @@
 
         .skip-link:focus { top: 12px; }
 
-        .orientation-notice {
-            display: none;
-        }
-
-        header {
-            background: var(--hijau-gelap);
-            color: white;
-            padding: 22px 20px;
-        }
-
-        .header-content, main {
+        main {
             width: min(100%, 1100px);
             margin: 0 auto;
         }
 
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .brand-icon {
-            display: grid;
-            place-items: center;
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: var(--kuning);
-            color: #1a281e;
-            font-size: 28px;
-            font-weight: 800;
-        }
-
-        .brand h1 {
-            margin: 0;
-            font-size: clamp(1.65rem, 6vw, 2.25rem);
-        }
-
-        .brand p {
-            margin: 0;
-            color: #d9ebe3;
-            font-size: 1rem;
-        }
-
-        main { padding: 28px 20px 48px; }
-
-        .intro {
-            max-width: 760px;
-            margin-bottom: 24px;
-        }
-
-        .intro h2 { margin-bottom: 6px; }
-
-        .privacy {
-            border-left: 6px solid var(--hijau);
-            background: #e6f1eb;
-            padding: 14px 16px;
-            border-radius: 8px;
-        }
+        main { padding: 12px 20px 48px; }
 
         .grid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 22px;
-            margin-top: 24px;
+            grid-template-columns: 1fr;
+            gap: 14px;
         }
 
         .panel {
             background: var(--putih);
             border: 1px solid var(--garis);
             border-radius: 16px;
-            padding: 20px;
+            padding: 12px;
             box-shadow: 0 3px 12px rgba(12, 48, 38, .08);
         }
 
@@ -129,16 +75,16 @@
         .camera {
             position: relative;
             overflow: hidden;
-            min-height: 290px;
+            min-height: 320px;
             background: #17201d;
             border-radius: 12px;
-            margin: 18px 0;
+            margin: 0;
         }
 
         video {
             display: block;
             width: 100%;
-            min-height: 290px;
+            min-height: 320px;
             object-fit: cover;
         }
 
@@ -199,6 +145,23 @@
             color: #07372f;
             background: #d9f5e6;
             border-color: #0b4f43;
+        }
+
+        .hold-text-button {
+            position: fixed;
+            z-index: 30;
+            top: max(12px, env(safe-area-inset-top));
+            right: 12px;
+            min-height: 48px;
+            padding-inline: 16px;
+            background: var(--putih);
+            box-shadow: 0 3px 12px rgba(12, 48, 38, .25);
+        }
+
+        .hold-text-button[aria-pressed="true"] {
+            background: var(--kuning);
+            border-color: #6d5200;
+            color: #3d2e00;
         }
 
         .sr-only {
@@ -267,90 +230,31 @@
             color: var(--abu);
         }
 
-        footer {
-            text-align: center;
-            padding: 18px;
-            color: var(--abu);
-        }
-
         @media (max-width: 760px) {
             body { font-size: 17px; }
-            .grid { grid-template-columns: 1fr; }
             .panel { padding: 16px; }
-            main { padding: 22px 14px 40px; }
-            header { padding: 18px 14px; }
+            main { padding: 10px 14px 40px; }
             .speak-dock { width: calc(100% - 28px); }
             .speak-dock .primary { min-width: 0; flex: 1; }
             .speak-dock button { padding-inline: 12px; }
         }
 
-        @media (orientation: landscape) {
-            .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        }
-
         @media (orientation: landscape) and (max-height: 600px) {
-            header { padding: 12px 20px; }
-            main { padding-top: 16px; }
-            .intro { margin-bottom: 14px; }
             .camera, video { min-height: 220px; }
-        }
-
-        @media (orientation: portrait) {
-            .orientation-notice {
-                position: fixed;
-                inset: 0;
-                z-index: 100;
-                display: grid;
-                place-items: center;
-                padding: 24px;
-                background: #07372f;
-                color: #fff;
-                text-align: center;
-            }
-
-            .orientation-notice div { max-width: 420px; }
-            .orientation-notice strong { display: block; font-size: 1.5rem; }
-            .orientation-notice p { color: #d9ebe3; }
         }
     </style>
 </head>
 <body>
-    <a class="skip-link" href="#pemindai">Langsung ke pemindai</a>
-
-    <div class="orientation-notice" id="orientation-notice" role="alert" aria-live="assertive">
-        <div>
-            <strong>Putar perangkat ke posisi horizontal.</strong>
-            <p>Bacara hanya digunakan dalam mode landscape agar kamera dan tombol pembacaan mudah dijangkau.</p>
-        </div>
-    </div>
-
-    <header>
-        <div class="header-content">
-            <div class="brand">
-                <div class="brand-icon" aria-hidden="true">B</div>
-                <div>
-                    <h1>Bacara</h1>
-                    <p>Pembaca buku cetak melalui kamera dan suara</p>
-                </div>
-            </div>
-        </div>
-    </header>
+    <a class="skip-link" href="#hasil-teks">Langsung ke hasil teks</a>
+    <button class="hold-text-button" id="hold-text" type="button" aria-pressed="false">Tahan teks</button>
 
     <main>
-        <section class="intro" aria-labelledby="judul-pengantar">
-            <h2 id="judul-pengantar">Baca teks buku dengan kamera</h2>
-            <p>Arahkan kamera ke halaman buku untuk mendeteksi teks secara real-time, lalu dengarkan hasilnya. Dirancang untuk penggunaan ponsel dan pembaca layar.</p>
-            <p class="privacy"><strong>Privasi:</strong> gambar buku diproses langsung di browser. Bacara tidak menyimpan foto atau teks Anda ke database.</p>
-        </section>
-
-        <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">
-            Tekan “Aktifkan kamera” untuk memulai.
-        </p>
+        <h1 class="sr-only">Bacara, pembaca buku melalui kamera</h1>
+        <p id="status" class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-mode="info">Panduan suara sedang disiapkan.</p>
 
         <div class="grid">
             <section class="panel" id="pemindai" aria-labelledby="judul-kamera">
-                <h2 id="judul-kamera">1. Kamera</h2>
-                <p>Aktifkan kamera dari tombol kontrol di bawah. Teks pada halaman akan dikenali secara real-time.</p>
+                <h2 id="judul-kamera" class="sr-only">Kamera</h2>
 
                 <div class="camera">
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
@@ -358,12 +262,10 @@
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
-                <h2 id="judul-teks">2. Hasil teks</h2>
-                <p>Hasil deteksi teks akan muncul di sini. Anda juga dapat memperbaikinya secara manual.</p>
+                <h2 id="judul-teks" class="sr-only">Hasil teks</h2>
 
                 <label for="hasil-teks">Hasil teks</label>
-                <textarea id="hasil-teks" placeholder="Hasil teks akan muncul di sini." aria-describedby="bantuan-teks"></textarea>
-                <p class="small" id="bantuan-teks">Anda dapat mengedit teks dengan keyboard atau pembaca layar.</p>
+                <textarea id="hasil-teks" placeholder="Hasil teks akan muncul di sini."></textarea>
 
                 <label for="kecepatan">Kecepatan suara: <output id="nilai-kecepatan">0.9</output></label>
                 <input id="kecepatan" type="range" min="0.6" max="1.3" step="0.1" value="0.9">
@@ -371,8 +273,6 @@
             </section>
         </div>
     </main>
-
-    <footer>Bacara MVP · OCR Bahasa Indonesia dan Text-to-Speech di perangkat</footer>
 
     <canvas id="canvas" hidden></canvas>
 
@@ -382,7 +282,7 @@
         <button id="hentikan-suara" type="button">Hentikan suara</button>
         <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
     </div>
-    <p class="sr-only" id="bantuan-baca">Tombol ini selalu berada di tengah bawah layar. Tekan untuk membacakan hasil teks yang terdeteksi.</p>
+    <p class="sr-only" id="bantuan-baca">Ketuk sekali untuk mendengar fungsi tombol. Ketuk dua kali dengan cepat untuk menjalankannya.</p>
 
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
     <script>
@@ -394,6 +294,7 @@
         const cameraToggleButton = document.getElementById('camera-toggle');
         const stopSpeechButton = document.getElementById('hentikan-suara');
         const refreshTextButton = document.getElementById('refresh-text');
+        const holdTextButton = document.getElementById('hold-text');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
@@ -405,16 +306,22 @@
         let realtimeScanTimer = null;
         let realtimeRecognitionActive = false;
         let lastDetectedText = '';
+        let lastDetectedConfidence = 0;
+        let lastRecognitionState = '';
         let textEditedManually = false;
+        let textHeld = false;
         let isReadingText = false;
         let speechSession = 0;
+        let initialGuidancePlayed = false;
         let lightTimer = null;
         let torchAvailable = false;
         let torchEnabled = false;
         let isMeasuringLight = false;
 
         const DARKNESS_THRESHOLD = 58;
-        const REALTIME_SCAN_DELAY = 1000;
+        const REALTIME_SCAN_DELAY = 5000;
+        const MINIMUM_OCR_CONFIDENCE = 50;
+        const DOUBLE_ACTIVATION_DELAY = 450;
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
@@ -427,8 +334,12 @@
                 .find((voice) => voice.lang.toLowerCase().startsWith('id'));
         }
 
-        function speakGuidance(message) {
-            if (isReadingText || !('speechSynthesis' in window)) return;
+        function speakMessage(message) {
+            if (!('speechSynthesis' in window)) return;
+
+            speechSession += 1;
+            isReadingText = false;
+            window.speechSynthesis.cancel();
 
             const guidance = new SpeechSynthesisUtterance(message);
             const indonesianVoice = getIndonesianVoice();
@@ -445,56 +356,18 @@
             window.speechSynthesis.speak(guidance);
         }
 
+        function speakGuidance(message) {
+            if (isReadingText) return;
+
+            speakMessage(message);
+        }
+
         function refreshCameraToggleButton() {
             const cameraOn = stream !== null;
             cameraToggleButton.disabled = cameraStarting;
             cameraToggleButton.textContent = cameraOn ? 'Matikan kamera' : 'Aktifkan kamera';
             cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
             cameraToggleButton.classList.toggle('warning', cameraOn);
-        }
-
-        function isPortraitOrientation() {
-            return window.matchMedia('(orientation: portrait)').matches;
-        }
-
-        async function requestLandscapeMode() {
-            if (!window.screen?.orientation || typeof window.screen.orientation.lock !== 'function') return;
-
-            try {
-                await window.screen.orientation.lock('landscape');
-            } catch (error) {
-                // Sebagian browser hanya mengizinkan lock pada mode layar penuh.
-                // Layar instruksi CSS di portrait tetap memastikan Bacara hanya dipakai horizontal.
-                console.info('Kunci orientasi tidak tersedia pada browser ini.', error);
-            }
-        }
-
-        let portraitNoticeActive = false;
-
-        function requireLandscapeMode() {
-            if (!isPortraitOrientation()) {
-                portraitNoticeActive = false;
-                return true;
-            }
-
-            if (!portraitNoticeActive) {
-                const message = 'Putar perangkat ke posisi horizontal untuk menggunakan Bacara.';
-                setStatus(message, 'error');
-                speakGuidance(message);
-                portraitNoticeActive = true;
-            }
-
-            return false;
-        }
-
-        function handleOrientationChange() {
-            if (!isPortraitOrientation()) {
-                portraitNoticeActive = false;
-                return;
-            }
-
-            if (stream) stopCamera();
-            requireLandscapeMode();
         }
 
         async function startCamera() {
@@ -510,10 +383,6 @@
             refreshCameraToggleButton();
 
             try {
-                await requestLandscapeMode();
-
-                if (!requireLandscapeMode()) return;
-
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: 'environment' },
@@ -524,16 +393,9 @@
                     audio: false
                 });
 
-                // Izin dapat selesai setelah perangkat diputar; jangan aktifkan kamera pada mode portrait.
-                if (!requireLandscapeMode()) {
-                    stream.getTracks().forEach((track) => track.stop());
-                    stream = null;
-                    return;
-                }
-
                 video.srcObject = stream;
                 await video.play();
-                setStatus('Kamera aktif. Mendeteksi teks secara real-time.');
+                setStatus('Kamera aktif. Teks akan diperbarui setiap lima detik.');
                 refreshCameraToggleButton();
                 startLightMonitor();
                 startRealtimeTextRecognition();
@@ -667,7 +529,7 @@
             const sourceY = Math.floor(video.videoHeight * inset);
             const sourceWidth = Math.floor(video.videoWidth * (1 - (inset * 2)));
             const sourceHeight = Math.floor(video.videoHeight * (1 - (inset * 2)));
-            const maxOcrWidth = 960;
+            const maxOcrWidth = 1280;
             const scale = Math.min(1, maxOcrWidth / sourceWidth);
 
             canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
@@ -675,9 +537,11 @@
 
             const lightLevel = estimateLightLevel();
             const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.imageSmoothingEnabled = true;
+            context.imageSmoothingQuality = 'high';
             context.filter = lightLevel !== null && lightLevel < 90
-                ? 'grayscale(1) contrast(1.85) brightness(1.22)'
-                : 'grayscale(1) contrast(1.45)';
+                ? 'grayscale(1) contrast(2) brightness(1.28)'
+                : 'grayscale(1) contrast(1.65) brightness(1.08)';
             context.drawImage(
                 video,
                 sourceX,
@@ -699,7 +563,7 @@
 
             worker = await Tesseract.createWorker('ind+eng', 1);
             await worker.setParameters({
-                tessedit_pageseg_mode: '6',
+                tessedit_pageseg_mode: '3',
                 preserve_interword_spaces: '1'
             });
 
@@ -717,7 +581,7 @@
         }
 
         function startRealtimeTextRecognition() {
-            if (!stream || realtimeRecognitionActive) return;
+            if (!stream || realtimeRecognitionActive || textHeld) return;
 
             realtimeRecognitionActive = true;
             scheduleRealtimeTextRecognition(500);
@@ -733,7 +597,7 @@
         }
 
         function scheduleRealtimeTextRecognition(delay = REALTIME_SCAN_DELAY) {
-            if (!realtimeRecognitionActive || !stream) return;
+            if (!realtimeRecognitionActive || !stream || textHeld) return;
 
             realtimeScanTimer = window.setTimeout(async () => {
                 realtimeScanTimer = null;
@@ -743,7 +607,7 @@
         }
 
         async function recognizeTextInRealtime() {
-            if (!stream || !realtimeRecognitionActive || scanning || video.readyState < 2) return;
+            if (!stream || !realtimeRecognitionActive || textHeld || scanning || video.readyState < 2) return;
 
             scanning = true;
 
@@ -751,13 +615,28 @@
                 const ocrWorker = await getWorker();
                 const result = await ocrWorker.recognize(captureFrame());
                 const detectedText = normalizeOcrText(result.data.text);
+                const confidence = Number(result.data.confidence) || 0;
 
-                if (!realtimeRecognitionActive || !detectedText || textEditedManually) return;
+                if (!realtimeRecognitionActive || textHeld || textEditedManually) return;
 
-                if (detectedText !== lastDetectedText) {
+                if (detectedText.length < 8 || confidence < MINIMUM_OCR_CONFIDENCE) {
+                    if (lastRecognitionState !== 'unclear') {
+                        setStatus('Teks belum cukup jelas. Bersihkan lensa, ratakan buku, lalu arahkan kamera lebih dekat.', 'error');
+                        lastRecognitionState = 'unclear';
+                    }
+                    return;
+                }
+
+                const isBetterReading = confidence >= lastDetectedConfidence - 5;
+
+                if (detectedText !== lastDetectedText && (isBetterReading || !lastDetectedText)) {
                     textArea.value = detectedText;
                     lastDetectedText = detectedText;
-                    setStatus('Teks terdeteksi dan diperbarui secara real-time.', 'detected');
+                    lastDetectedConfidence = confidence;
+                    lastRecognitionState = 'detected';
+                    setStatus('Teks diperbarui. Pemindaian berikutnya dilakukan dalam lima detik.', 'detected');
+                } else if (detectedText === lastDetectedText) {
+                    lastDetectedConfidence = Math.max(lastDetectedConfidence, confidence);
                 }
             } catch (error) {
                 console.error(error);
@@ -827,25 +706,114 @@
             window.speechSynthesis.speak(speech);
         }
 
-        function refreshText() {
-            speechSession += 1;
-            isReadingText = false;
-            window.speechSynthesis.cancel();
-            textArea.value = '';
-            lastDetectedText = '';
-            textEditedManually = false;
-            setStatus('Hasil teks dikosongkan. Deteksi real-time tetap berjalan.');
+        function refreshHoldTextButton() {
+            holdTextButton.textContent = textHeld ? 'Lanjutkan teks' : 'Tahan teks';
+            holdTextButton.setAttribute('aria-pressed', String(textHeld));
         }
 
-        speakButton.addEventListener('click', speakText);
-        cameraToggleButton.addEventListener('click', toggleCamera);
-        refreshTextButton.addEventListener('click', refreshText);
-        stopSpeechButton.addEventListener('click', () => {
+        function setTextHeld(shouldHold) {
+            if (textHeld === shouldHold) return;
+
+            textHeld = shouldHold;
+            refreshHoldTextButton();
+
+            if (textHeld) {
+                stopRealtimeTextRecognition();
+                setStatus('Hasil teks ditahan. Teks tidak akan berubah sampai Anda melanjutkannya.');
+                return;
+            }
+
+            lastDetectedText = '';
+            lastDetectedConfidence = 0;
+            lastRecognitionState = '';
+            textEditedManually = false;
+            setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui setiap lima detik.');
+            startRealtimeTextRecognition();
+        }
+
+        function toggleTextHold() {
+            setTextHeld(!textHeld);
+        }
+
+        function stopSpeech() {
             speechSession += 1;
             isReadingText = false;
-            window.speechSynthesis.cancel();
+
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+
             setStatus('Pembacaan dihentikan.');
-        });
+        }
+
+        function refreshText() {
+            stopSpeech();
+            textArea.value = '';
+            lastDetectedText = '';
+            lastDetectedConfidence = 0;
+            lastRecognitionState = '';
+            textEditedManually = false;
+            setStatus(textHeld
+                ? 'Hasil teks dikosongkan dan tetap ditahan.'
+                : 'Hasil teks dikosongkan. Deteksi real-time tetap berjalan.');
+        }
+
+        function attachDoubleActivation(button, getAnnouncement, action) {
+            let activationTimer = null;
+
+            button.addEventListener('click', () => {
+                if (activationTimer !== null) {
+                    window.clearTimeout(activationTimer);
+                    activationTimer = null;
+                    action();
+                    return;
+                }
+
+                activationTimer = window.setTimeout(() => {
+                    activationTimer = null;
+                    speakMessage(getAnnouncement());
+                }, DOUBLE_ACTIVATION_DELAY);
+            });
+        }
+
+        function playInitialGuidance() {
+            if (initialGuidancePlayed) return;
+
+            initialGuidancePlayed = true;
+            const guidance = 'Selamat datang di Bacara. Bersihkan lensa kamera, letakkan buku di tempat yang cukup terang, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Kamera akan membaca teks setiap lima detik. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            setStatus('Panduan penggunaan sedang dibacakan.');
+            speakMessage(guidance);
+        }
+
+        attachDoubleActivation(
+            speakButton,
+            () => 'Tombol Bacakan teks. Ketuk cepat dua kali untuk membacakan hasil teks.',
+            speakText
+        );
+        attachDoubleActivation(
+            cameraToggleButton,
+            () => stream
+                ? 'Tombol Matikan kamera. Ketuk cepat dua kali untuk mematikan kamera.'
+                : 'Tombol Aktifkan kamera. Ketuk cepat dua kali untuk mengaktifkan kamera.',
+            toggleCamera
+        );
+        attachDoubleActivation(
+            stopSpeechButton,
+            () => 'Tombol Hentikan suara. Ketuk cepat dua kali untuk menghentikan pembacaan.',
+            stopSpeech
+        );
+        attachDoubleActivation(
+            refreshTextButton,
+            () => 'Tombol Refresh. Ketuk cepat dua kali untuk mengosongkan hasil teks.',
+            refreshText
+        );
+        attachDoubleActivation(
+            holdTextButton,
+            () => textHeld
+                ? 'Tombol Lanjutkan teks. Ketuk cepat dua kali agar hasil diperbarui kembali setiap lima detik.'
+                : 'Tombol Tahan teks. Ketuk cepat dua kali agar hasil teks tidak berubah.',
+            toggleTextHold
+        );
 
         rate.addEventListener('input', () => {
             rateValue.textContent = Number(rate.value).toFixed(1);
@@ -853,21 +821,27 @@
 
         textArea.addEventListener('input', () => {
             textEditedManually = true;
+            setTextHeld(true);
         });
 
         window.addEventListener('pagehide', () => {
             stopCamera();
-            window.speechSynthesis.cancel();
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
 
             if (worker) {
                 worker.terminate();
             }
         });
 
-        window.addEventListener('orientationchange', handleOrientationChange);
-        window.addEventListener('resize', handleOrientationChange);
-
         refreshCameraToggleButton();
+        refreshHoldTextButton();
+
+        window.addEventListener('load', () => {
+            window.setTimeout(playInitialGuidance, 250);
+            window.setTimeout(startCamera, 900);
+        }, { once: true });
     </script>
 </body>
 </html>

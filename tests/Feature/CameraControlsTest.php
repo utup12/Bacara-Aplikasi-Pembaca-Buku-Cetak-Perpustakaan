@@ -6,7 +6,7 @@ use Tests\TestCase;
 
 class CameraControlsTest extends TestCase
 {
-    public function test_camera_page_provides_a_toggle_button_with_real_time_text_detection(): void
+    public function test_camera_page_provides_accessible_real_time_camera_controls(): void
     {
         $response = $this->get('/');
 
@@ -16,15 +16,16 @@ class CameraControlsTest extends TestCase
             ->assertSee('id="camera-toggle"', false)
             ->assertSee('Aktifkan kamera</button>', false)
             ->assertSee('Matikan kamera', false)
-            ->assertSee("cameraToggleButton.addEventListener('click', toggleCamera)", false)
             ->assertDontSee('id="start-camera"', false)
             ->assertDontSee('id="scan"', false)
             ->assertDontSee('id="auto-scan"', false)
             ->assertSee('tesseract.js', false)
-            ->assertSee('startRealtimeTextRecognition()', false);
+            ->assertSee('startRealtimeTextRecognition()', false)
+            ->assertSee('const REALTIME_SCAN_DELAY = 5000', false)
+            ->assertSee('const MINIMUM_OCR_CONFIDENCE = 50', false);
     }
 
-    public function test_camera_page_provides_a_refresh_button_for_detected_text(): void
+    public function test_camera_page_provides_hold_and_double_activation_controls(): void
     {
         $response = $this->get('/');
 
@@ -32,7 +33,11 @@ class CameraControlsTest extends TestCase
             ->assertOk()
             ->assertSee('id="refresh-text"', false)
             ->assertSee('Refresh</button>', false)
-            ->assertSee("refreshTextButton.addEventListener('click', refreshText)", false)
+            ->assertSee('id="hold-text"', false)
+            ->assertSee('Tahan teks</button>', false)
+            ->assertSee('function attachDoubleActivation', false)
+            ->assertSee('Ketuk sekali sebuah tombol untuk mendengar fungsinya.', false)
+            ->assertSee('const DOUBLE_ACTIVATION_DELAY = 450', false)
             ->assertDontSee('textArea.focus()', false);
     }
 }
