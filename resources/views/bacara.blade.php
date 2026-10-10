@@ -364,7 +364,7 @@
         </section>
 
         <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">
-            Tekan “Aktifkan kamera” untuk memulai.
+            Kamera akan disiapkan otomatis. Izinkan akses jika diminta browser.
         </p>
 
         <div class="grid">
@@ -944,7 +944,7 @@
         window.addEventListener('resize', handleOrientationChange);
 
         refreshButtons();
-        window.addEventListener('load', () => {
+        document.addEventListener('DOMContentLoaded', () => {
             if (requireLandscapeMode()) startCamera();
         }, { once: true });
     </script>
