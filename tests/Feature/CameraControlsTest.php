@@ -40,6 +40,8 @@ class CameraControlsTest extends TestCase
             ->assertSee('Refresh</button>', false)
             ->assertSee('id="hold-text"', false)
             ->assertSee('Tahan teks</button>', false)
+            ->assertSee('id="torch-toggle"', false)
+            ->assertSee('function toggleTorch', false)
             ->assertSee('function attachDoubleActivation', false)
             ->assertSee('function waitForOcrOperation', false)
             ->assertSee('function reportOcrProgress', false)
