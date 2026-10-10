@@ -339,7 +339,7 @@
     <main>
         <section class="intro" aria-labelledby="judul-pengantar">
             <h2 id="judul-pengantar">Baca teks buku dengan kamera</h2>
-            <p>Arahkan kamera ke halaman buku, lalu ketik atau tempel teks untuk dibacakan. Dirancang untuk penggunaan ponsel dan pembaca layar.</p>
+            <p>Arahkan kamera ke halaman buku untuk mendeteksi teks secara real-time, lalu dengarkan hasilnya. Dirancang untuk penggunaan ponsel dan pembaca layar.</p>
             <p class="privacy"><strong>Privasi:</strong> gambar buku diproses langsung di browser. Bacara tidak menyimpan foto atau teks Anda ke database.</p>
         </section>
 
@@ -350,7 +350,7 @@
         <div class="grid">
             <section class="panel" id="pemindai" aria-labelledby="judul-kamera">
                 <h2 id="judul-kamera">1. Kamera</h2>
-                <p>Aktifkan kamera dari tombol kontrol di bawah untuk melihat halaman buku.</p>
+                <p>Aktifkan kamera dari tombol kontrol di bawah. Teks pada halaman akan dikenali secara real-time.</p>
 
                 <div class="camera">
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
@@ -359,10 +359,10 @@
 
             <section class="panel" aria-labelledby="judul-teks">
                 <h2 id="judul-teks">2. Hasil teks</h2>
-                <p>Ketik atau tempel teks yang ingin dibacakan.</p>
+                <p>Hasil deteksi teks akan muncul di sini. Anda juga dapat memperbaikinya secara manual.</p>
 
                 <label for="hasil-teks">Hasil teks</label>
-                <textarea id="hasil-teks" placeholder="Ketik atau tempel teks di sini." aria-describedby="bantuan-teks"></textarea>
+                <textarea id="hasil-teks" placeholder="Hasil teks akan muncul di sini." aria-describedby="bantuan-teks"></textarea>
                 <p class="small" id="bantuan-teks">Anda dapat mengedit teks dengan keyboard atau pembaca layar.</p>
 
                 <label for="kecepatan">Kecepatan suara: <output id="nilai-kecepatan">0.9</output></label>
@@ -372,7 +372,9 @@
         </div>
     </main>
 
-    <footer>Bacara MVP · Kamera dan Text-to-Speech di perangkat</footer>
+    <footer>Bacara MVP · OCR Bahasa Indonesia dan Text-to-Speech di perangkat</footer>
+
+    <canvas id="canvas" hidden></canvas>
 
     <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
         <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
@@ -382,8 +384,10 @@
     </div>
     <p class="sr-only" id="bantuan-baca">Tombol ini selalu berada di tengah bawah layar. Tekan untuk membacakan hasil teks yang terdeteksi.</p>
 
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
     <script>
         const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
         const statusBox = document.getElementById('status');
         const textArea = document.getElementById('hasil-teks');
         const speakButton = document.getElementById('baca');
@@ -396,6 +400,12 @@
 
         let stream = null;
         let cameraStarting = false;
+        let worker = null;
+        let scanning = false;
+        let realtimeScanTimer = null;
+        let realtimeRecognitionActive = false;
+        let lastDetectedText = '';
+        let textEditedManually = false;
         let isReadingText = false;
         let speechSession = 0;
         let lightTimer = null;
@@ -404,6 +414,7 @@
         let isMeasuringLight = false;
 
         const DARKNESS_THRESHOLD = 58;
+        const REALTIME_SCAN_DELAY = 1000;
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
@@ -522,9 +533,10 @@
 
                 video.srcObject = stream;
                 await video.play();
-                setStatus('Kamera aktif.');
+                setStatus('Kamera aktif. Mendeteksi teks secara real-time.');
                 refreshCameraToggleButton();
                 startLightMonitor();
+                startRealtimeTextRecognition();
             } catch (error) {
                 setStatus('Kamera tidak dapat diakses. Izinkan akses kamera di browser, lalu coba lagi.', 'error');
                 console.error(error);
@@ -535,6 +547,7 @@
         }
 
         function stopCamera() {
+            stopRealtimeTextRecognition();
             stopLightMonitor();
 
             if (stream) {
@@ -644,6 +657,117 @@
             isMeasuringLight = false;
         }
 
+        function captureFrame() {
+            if (!video.videoWidth || !video.videoHeight) {
+                throw new Error('Ukuran video belum tersedia.');
+            }
+
+            const inset = 0.05;
+            const sourceX = Math.floor(video.videoWidth * inset);
+            const sourceY = Math.floor(video.videoHeight * inset);
+            const sourceWidth = Math.floor(video.videoWidth * (1 - (inset * 2)));
+            const sourceHeight = Math.floor(video.videoHeight * (1 - (inset * 2)));
+            const maxOcrWidth = 960;
+            const scale = Math.min(1, maxOcrWidth / sourceWidth);
+
+            canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
+            canvas.height = Math.max(1, Math.floor(sourceHeight * scale));
+
+            const lightLevel = estimateLightLevel();
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.filter = lightLevel !== null && lightLevel < 90
+                ? 'grayscale(1) contrast(1.85) brightness(1.22)'
+                : 'grayscale(1) contrast(1.45)';
+            context.drawImage(
+                video,
+                sourceX,
+                sourceY,
+                sourceWidth,
+                sourceHeight,
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+            context.filter = 'none';
+
+            return canvas;
+        }
+
+        async function getWorker() {
+            if (worker) return worker;
+
+            worker = await Tesseract.createWorker('ind+eng', 1);
+            await worker.setParameters({
+                tessedit_pageseg_mode: '6',
+                preserve_interword_spaces: '1'
+            });
+
+            return worker;
+        }
+
+        function normalizeOcrText(rawText) {
+            return rawText
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .replace(/^([ \t]*)([\u2022\u25CF\u25CB\u25E6\u25AA\u25AB\u25A0\u25A1\u25C6\u25C7])\s*/gm, '$1\u2022 ')
+                .replace(/^([ \t]*)(\d+)\s*[\)\]]\s*/gm, '$1$2. ')
+                .replace(/^([ \t]*)([A-Za-z])\s*[\)\]]\s*/gm, '$1$2. ')
+                .trim();
+        }
+
+        function startRealtimeTextRecognition() {
+            if (!stream || realtimeRecognitionActive) return;
+
+            realtimeRecognitionActive = true;
+            scheduleRealtimeTextRecognition(500);
+        }
+
+        function stopRealtimeTextRecognition() {
+            realtimeRecognitionActive = false;
+
+            if (realtimeScanTimer !== null) {
+                window.clearTimeout(realtimeScanTimer);
+                realtimeScanTimer = null;
+            }
+        }
+
+        function scheduleRealtimeTextRecognition(delay = REALTIME_SCAN_DELAY) {
+            if (!realtimeRecognitionActive || !stream) return;
+
+            realtimeScanTimer = window.setTimeout(async () => {
+                realtimeScanTimer = null;
+                await recognizeTextInRealtime();
+                scheduleRealtimeTextRecognition();
+            }, delay);
+        }
+
+        async function recognizeTextInRealtime() {
+            if (!stream || !realtimeRecognitionActive || scanning || video.readyState < 2) return;
+
+            scanning = true;
+
+            try {
+                const ocrWorker = await getWorker();
+                const result = await ocrWorker.recognize(captureFrame());
+                const detectedText = normalizeOcrText(result.data.text);
+
+                if (!realtimeRecognitionActive || !detectedText || textEditedManually) return;
+
+                if (detectedText !== lastDetectedText) {
+                    textArea.value = detectedText;
+                    lastDetectedText = detectedText;
+                    setStatus('Teks terdeteksi dan diperbarui secara real-time.', 'detected');
+                }
+            } catch (error) {
+                console.error(error);
+                setStatus('Deteksi teks tidak dapat dijalankan. Periksa koneksi internet, lalu aktifkan kamera kembali.', 'error');
+                stopRealtimeTextRecognition();
+            } finally {
+                scanning = false;
+            }
+        }
+
         function makeTextSpeakable(text) {
             return text
                 .replace(/^([ \t]*)\u2022\s*/gm, '$1Poin. ')
@@ -708,8 +832,9 @@
             isReadingText = false;
             window.speechSynthesis.cancel();
             textArea.value = '';
-            setStatus('Hasil teks dikosongkan.');
-            textArea.focus();
+            lastDetectedText = '';
+            textEditedManually = false;
+            setStatus('Hasil teks dikosongkan. Deteksi real-time tetap berjalan.');
         }
 
         speakButton.addEventListener('click', speakText);
@@ -726,9 +851,17 @@
             rateValue.textContent = Number(rate.value).toFixed(1);
         });
 
+        textArea.addEventListener('input', () => {
+            textEditedManually = true;
+        });
+
         window.addEventListener('pagehide', () => {
             stopCamera();
             window.speechSynthesis.cancel();
+
+            if (worker) {
+                worker.terminate();
+            }
         });
 
         window.addEventListener('orientationchange', handleOrientationChange);
