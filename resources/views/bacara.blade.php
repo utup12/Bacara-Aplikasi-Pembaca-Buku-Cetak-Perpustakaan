@@ -332,7 +332,7 @@
                     <video id="video" autoplay playsinline muted aria-label="Pratinjau kamera buku"></video>
                     <div class="scan-guide" aria-hidden="true"></div>
                 </div>
-                <p class="small">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
+                <p class="small" id="camera-instruction">Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.</p>
             </section>
 
             <section class="panel" aria-labelledby="judul-teks">
@@ -422,6 +422,7 @@
         const MINIMUM_SHARPNESS = 18;
         const AUTO_SCAN_COOLDOWN = 2400;
         const DOUBLE_ACTIVATION_DELAY = 450;
+        const CAMERA_FRAME_INSTRUCTION = 'Masukkan satu halaman buku ke bingkai, tahan perangkat sampai stabil, lalu pindai.';
 
         function setStatus(message, mode = 'info') {
             statusBox.textContent = message;
@@ -544,7 +545,9 @@
                 await waitForCameraFrame();
                 await optimizeCameraForText();
                 setCameraScanState('waiting');
-                setStatus('Kamera aktif. Masukkan satu halaman ke bingkai dan tahan perangkat tetap stabil.');
+                const cameraReadyMessage = `Kamera aktif. ${CAMERA_FRAME_INSTRUCTION}`;
+                setStatus(cameraReadyMessage);
+                speakGuidance(cameraReadyMessage);
                 refreshCameraToggleButton();
                 startLightMonitor();
                 startRealtimeTextRecognition();
