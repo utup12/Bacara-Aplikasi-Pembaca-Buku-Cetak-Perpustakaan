@@ -38,6 +38,9 @@ class CameraControlsTest extends TestCase
             ->assertSee('worker.recognize(source, {}, { blocks: true })', false)
             ->assertSee('function getWordConfidenceValues', false)
             ->assertSee('function selectBestOcrCandidate', false)
+            ->assertSee('function needsOcrFallback', false)
+            ->assertSee('const primaryCandidate = await recognizeOcrCandidate(ocrWorker, frame, 3)', false)
+            ->assertSee('const fallbackCandidate = await recognizeOcrCandidate(ocrWorker, adaptiveFrame, 6)', false)
             ->assertSee('function configureIndonesianVoice', false);
     }
 
@@ -52,12 +55,10 @@ class CameraControlsTest extends TestCase
             ->assertDontSee('id="hold-text"', false)
             ->assertSee('let textLocked = false', false)
             ->assertSee('Ketuk dua kali tombol Refresh untuk memindai halaman baru.', false)
-            ->assertSee('id="torch-toggle"', false)
-            ->assertSee('speak-dock-wrap', false)
-            ->assertSee('bottom: calc(100% + 10px)', false)
-            ->assertSee('function getTorchCapabilities', false)
-            ->assertSee('values.includes(true)', false)
-            ->assertSee('function toggleTorch', false)
+            ->assertDontSee('id="torch-toggle"', false)
+            ->assertDontSee('class="torch-button"', false)
+            ->assertDontSee('function toggleTorch', false)
+            ->assertDontSee('Tombol Senter', false)
             ->assertSee('function attachDoubleActivation', false)
             ->assertSee('function waitForOcrOperation', false)
             ->assertSee('function reportOcrProgress', false)
