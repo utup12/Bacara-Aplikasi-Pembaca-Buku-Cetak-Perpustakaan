@@ -22,7 +22,10 @@ class CameraControlsTest extends TestCase
             ->assertSee('tesseract.js', false)
             ->assertSee('startRealtimeTextRecognition()', false)
             ->assertSee('const REALTIME_SCAN_DELAY = 5000', false)
-            ->assertSee('const MINIMUM_OCR_CONFIDENCE = 50', false);
+            ->assertSee('const MINIMUM_OCR_CONFIDENCE = 18', false)
+            ->assertSee('const OCR_TARGET_WIDTH = 1920', false)
+            ->assertSee('function optimizeCameraForText', false)
+            ->assertSee('function recognizeBookPage', false);
     }
 
     public function test_camera_page_provides_hold_and_double_activation_controls(): void

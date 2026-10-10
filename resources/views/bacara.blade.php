@@ -306,7 +306,7 @@
         let realtimeScanTimer = null;
         let realtimeRecognitionActive = false;
         let lastDetectedText = '';
-        let lastDetectedConfidence = 0;
+        let lastDetectedScore = 0;
         let lastRecognitionState = '';
         let textEditedManually = false;
         let textHeld = false;
@@ -320,7 +320,8 @@
 
         const DARKNESS_THRESHOLD = 58;
         const REALTIME_SCAN_DELAY = 5000;
-        const MINIMUM_OCR_CONFIDENCE = 50;
+        const MINIMUM_OCR_CONFIDENCE = 18;
+        const OCR_TARGET_WIDTH = 1920;
         const DOUBLE_ACTIVATION_DELAY = 450;
 
         function setStatus(message, mode = 'info') {
@@ -386,15 +387,17 @@
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: 'environment' },
-                        width: { ideal: 1280, max: 1280 },
-                        height: { ideal: 720, max: 720 },
-                        frameRate: { ideal: 24, max: 24 }
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        frameRate: { ideal: 30, max: 30 }
                     },
                     audio: false
                 });
 
                 video.srcObject = stream;
                 await video.play();
+                await waitForCameraFrame();
+                await optimizeCameraForText();
                 setStatus('Kamera aktif. Teks akan diperbarui setiap lima detik.');
                 refreshCameraToggleButton();
                 startLightMonitor();
@@ -433,6 +436,47 @@
 
         function getVideoTrack() {
             return stream?.getVideoTracks()[0] ?? null;
+        }
+
+        function waitForCameraFrame() {
+            if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                return Promise.resolve();
+            }
+
+            return new Promise((resolve) => {
+                const ready = () => resolve();
+                video.addEventListener('loadeddata', ready, { once: true });
+                window.setTimeout(ready, 1500);
+            });
+        }
+
+        async function optimizeCameraForText() {
+            const track = getVideoTrack();
+            const capabilities = typeof track?.getCapabilities === 'function'
+                ? track.getCapabilities()
+                : {};
+            const advanced = {};
+
+            if (capabilities.focusMode?.includes('continuous')) {
+                advanced.focusMode = 'continuous';
+            }
+
+            if (capabilities.exposureMode?.includes('continuous')) {
+                advanced.exposureMode = 'continuous';
+            }
+
+            if (capabilities.whiteBalanceMode?.includes('continuous')) {
+                advanced.whiteBalanceMode = 'continuous';
+            }
+
+            if (!Object.keys(advanced).length) return;
+
+            try {
+                await track.applyConstraints({ advanced: [advanced] });
+            } catch (error) {
+                // Pengaturan fokus lanjutan tidak tersedia pada semua kamera Android.
+                console.info('Optimasi fokus kamera tidak tersedia.', error);
+            }
         }
 
         function estimateLightLevel() {
@@ -524,12 +568,12 @@
                 throw new Error('Ukuran video belum tersedia.');
             }
 
-            const inset = 0.05;
+            const inset = 0.015;
             const sourceX = Math.floor(video.videoWidth * inset);
             const sourceY = Math.floor(video.videoHeight * inset);
             const sourceWidth = Math.floor(video.videoWidth * (1 - (inset * 2)));
             const sourceHeight = Math.floor(video.videoHeight * (1 - (inset * 2)));
-            const maxOcrWidth = 1280;
+            const maxOcrWidth = OCR_TARGET_WIDTH;
             const scale = Math.min(1, maxOcrWidth / sourceWidth);
 
             canvas.width = Math.max(1, Math.floor(sourceWidth * scale));
@@ -540,8 +584,8 @@
             context.imageSmoothingEnabled = true;
             context.imageSmoothingQuality = 'high';
             context.filter = lightLevel !== null && lightLevel < 90
-                ? 'grayscale(1) contrast(2) brightness(1.28)'
-                : 'grayscale(1) contrast(1.65) brightness(1.08)';
+                ? 'grayscale(1) contrast(1.55) brightness(1.2)'
+                : 'grayscale(1) contrast(1.28) brightness(1.05)';
             context.drawImage(
                 video,
                 sourceX,
@@ -563,7 +607,7 @@
 
             worker = await Tesseract.createWorker('ind+eng', 1);
             await worker.setParameters({
-                tessedit_pageseg_mode: '3',
+                tessedit_pageseg_mode: '6',
                 preserve_interword_spaces: '1'
             });
 
@@ -578,6 +622,49 @@
                 .replace(/^([ \t]*)(\d+)\s*[\)\]]\s*/gm, '$1$2. ')
                 .replace(/^([ \t]*)([A-Za-z])\s*[\)\]]\s*/gm, '$1$2. ')
                 .trim();
+        }
+
+        function createOcrCandidate(result) {
+            const text = normalizeOcrText(result.data.text);
+            const compactText = text.replace(/\s/g, '');
+            const letters = (compactText.match(/[A-Za-zÀ-ÿ]/g) ?? []).length;
+            const words = text.match(/[A-Za-zÀ-ÿ]{2,}/g) ?? [];
+            const confidence = Number(result.data.confidence) || 0;
+            const letterRatio = compactText.length ? letters / compactText.length : 0;
+            const score = (confidence * 0.75)
+                + Math.min(25, letters / 10)
+                + Math.min(15, words.length * 1.5)
+                + (letterRatio * 10);
+
+            return { text, confidence, letters, words: words.length, letterRatio, score };
+        }
+
+        function isUsefulOcrCandidate(candidate) {
+            if (candidate.text.length < 12 || candidate.letters < 8 || candidate.words < 2) {
+                return false;
+            }
+
+            return candidate.confidence >= MINIMUM_OCR_CONFIDENCE || candidate.letterRatio >= 0.55;
+        }
+
+        async function recognizeBookPage(ocrWorker) {
+            const frame = captureFrame();
+            const paragraphResult = await ocrWorker.recognize(frame);
+            const paragraphCandidate = createOcrCandidate(paragraphResult);
+
+            if (isUsefulOcrCandidate(paragraphCandidate)) {
+                return paragraphCandidate;
+            }
+
+            // Mode sparse membantu ketika posisi buku tidak lurus atau halaman terdiri dari beberapa blok teks.
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '11' });
+            const sparseResult = await ocrWorker.recognize(frame);
+            await ocrWorker.setParameters({ tessedit_pageseg_mode: '6' });
+            const sparseCandidate = createOcrCandidate(sparseResult);
+
+            return sparseCandidate.score > paragraphCandidate.score
+                ? sparseCandidate
+                : paragraphCandidate;
         }
 
         function startRealtimeTextRecognition() {
@@ -613,30 +700,28 @@
 
             try {
                 const ocrWorker = await getWorker();
-                const result = await ocrWorker.recognize(captureFrame());
-                const detectedText = normalizeOcrText(result.data.text);
-                const confidence = Number(result.data.confidence) || 0;
+                const candidate = await recognizeBookPage(ocrWorker);
 
                 if (!realtimeRecognitionActive || textHeld || textEditedManually) return;
 
-                if (detectedText.length < 8 || confidence < MINIMUM_OCR_CONFIDENCE) {
+                if (!isUsefulOcrCandidate(candidate)) {
                     if (lastRecognitionState !== 'unclear') {
-                        setStatus('Teks belum cukup jelas. Bersihkan lensa, ratakan buku, lalu arahkan kamera lebih dekat.', 'error');
+                        setStatus('Teks belum cukup jelas. Bersihkan lensa, dekatkan kamera, lalu tahan buku tetap stabil.', 'error');
                         lastRecognitionState = 'unclear';
                     }
                     return;
                 }
 
-                const isBetterReading = confidence >= lastDetectedConfidence - 5;
+                const isBetterReading = candidate.score >= lastDetectedScore - 4;
 
-                if (detectedText !== lastDetectedText && (isBetterReading || !lastDetectedText)) {
-                    textArea.value = detectedText;
-                    lastDetectedText = detectedText;
-                    lastDetectedConfidence = confidence;
+                if (candidate.text !== lastDetectedText && (isBetterReading || !lastDetectedText)) {
+                    textArea.value = candidate.text;
+                    lastDetectedText = candidate.text;
+                    lastDetectedScore = candidate.score;
                     lastRecognitionState = 'detected';
                     setStatus('Teks diperbarui. Pemindaian berikutnya dilakukan dalam lima detik.', 'detected');
-                } else if (detectedText === lastDetectedText) {
-                    lastDetectedConfidence = Math.max(lastDetectedConfidence, confidence);
+                } else if (candidate.text === lastDetectedText) {
+                    lastDetectedScore = Math.max(lastDetectedScore, candidate.score);
                 }
             } catch (error) {
                 console.error(error);
@@ -724,7 +809,7 @@
             }
 
             lastDetectedText = '';
-            lastDetectedConfidence = 0;
+            lastDetectedScore = 0;
             lastRecognitionState = '';
             textEditedManually = false;
             setStatus('Deteksi teks dilanjutkan. Hasil akan diperbarui setiap lima detik.');
@@ -750,7 +835,7 @@
             stopSpeech();
             textArea.value = '';
             lastDetectedText = '';
-            lastDetectedConfidence = 0;
+            lastDetectedScore = 0;
             lastRecognitionState = '';
             textEditedManually = false;
             setStatus(textHeld
