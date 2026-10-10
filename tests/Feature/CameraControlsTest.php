@@ -48,6 +48,8 @@ class CameraControlsTest extends TestCase
             ->assertSee('let textLocked = false', false)
             ->assertSee('Ketuk dua kali tombol Refresh untuk memindai halaman baru.', false)
             ->assertSee('id="torch-toggle"', false)
+            ->assertSee('speak-dock-wrap', false)
+            ->assertSee('bottom: calc(100% + 10px)', false)
             ->assertSee('function toggleTorch', false)
             ->assertSee('function attachDoubleActivation', false)
             ->assertSee('function waitForOcrOperation', false)
