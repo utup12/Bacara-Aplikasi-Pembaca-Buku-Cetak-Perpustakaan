@@ -429,6 +429,7 @@
         const lightCanvas = document.createElement('canvas');
 
         let stream = null;
+        let cameraStarting = false;
         let worker = null;
         let scanning = false;
         let autoTimer = null;
@@ -493,7 +494,7 @@
             scanButton.disabled = !cameraOn || scanning;
             autoButton.disabled = !cameraOn;
             stopButton.disabled = !cameraOn;
-            startButton.disabled = cameraOn;
+            startButton.disabled = cameraOn || cameraStarting;
         }
 
         function isPortraitOrientation() {
@@ -541,10 +542,16 @@
         }
 
         async function startCamera() {
+            if (stream || cameraStarting) return;
+
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setStatus('Kamera memerlukan browser modern dan alamat HTTPS atau localhost.', 'error');
                 return;
             }
+
+            cameraStarting = true;
+            setStatus('Menyiapkan kamera. Izinkan akses jika diminta browser.');
+            refreshButtons();
 
             try {
                 await requestLandscapeMode();
@@ -561,6 +568,13 @@
                     audio: false
                 });
 
+                // Izin dapat selesai setelah perangkat diputar; jangan aktifkan kamera pada mode portrait.
+                if (!requireLandscapeMode()) {
+                    stream.getTracks().forEach((track) => track.stop());
+                    stream = null;
+                    return;
+                }
+
                 video.srcObject = stream;
                 await video.play();
                 detectionState = null;
@@ -571,6 +585,9 @@
             } catch (error) {
                 setStatus('Kamera tidak dapat diakses. Izinkan akses kamera di browser, lalu coba lagi.', 'error');
                 console.error(error);
+            } finally {
+                cameraStarting = false;
+                refreshButtons();
             }
         }
 
@@ -927,6 +944,9 @@
         window.addEventListener('resize', handleOrientationChange);
 
         refreshButtons();
+        window.addEventListener('load', () => {
+            if (requireLandscapeMode()) startCamera();
+        }, { once: true });
     </script>
 </body>
 </html>
