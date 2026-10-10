@@ -3,6 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-store, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
     <meta name="theme-color" content="#123b32">
     <title>Bacara — Baca buku lewat kamera</title>
     <style>
@@ -204,6 +206,23 @@
             color: #3d2e00;
         }
 
+        .torch-button {
+            position: fixed;
+            z-index: 30;
+            top: max(12px, env(safe-area-inset-top));
+            left: 12px;
+            min-height: 48px;
+            padding-inline: 16px;
+            background: var(--putih);
+            box-shadow: 0 3px 12px rgba(12, 48, 38, .25);
+        }
+
+        .torch-button[aria-pressed="true"] {
+            background: var(--kuning);
+            border-color: #6d5200;
+            color: #3d2e00;
+        }
+
         .sr-only {
             position: absolute;
             width: 1px;
@@ -298,6 +317,7 @@
 </head>
 <body>
     <a class="skip-link" href="#hasil-teks">Langsung ke hasil teks</a>
+    <button class="torch-button" id="torch-toggle" type="button" aria-pressed="false" hidden>Nyalakan senter</button>
     <button class="hold-text-button" id="hold-text" type="button" aria-pressed="false">Tahan teks</button>
 
     <main>
@@ -354,6 +374,7 @@
         const refreshTextButton = document.getElementById('refresh-text');
         const scanNowButton = document.getElementById('scan-now');
         const holdTextButton = document.getElementById('hold-text');
+        const torchToggleButton = document.getElementById('torch-toggle');
         const rate = document.getElementById('kecepatan');
         const rateValue = document.getElementById('nilai-kecepatan');
         const lightCanvas = document.createElement('canvas');
@@ -485,6 +506,14 @@
             cameraToggleButton.setAttribute('aria-pressed', String(cameraOn));
             cameraToggleButton.classList.toggle('warning', cameraOn);
             scanNowButton.disabled = !cameraOn || cameraStarting || scanning || textHeld;
+        }
+
+        function refreshTorchButton() {
+            const canUseTorch = stream !== null && torchAvailable;
+            torchToggleButton.hidden = !canUseTorch;
+            torchToggleButton.disabled = !canUseTorch;
+            torchToggleButton.textContent = torchEnabled ? 'Matikan senter' : 'Nyalakan senter';
+            torchToggleButton.setAttribute('aria-pressed', String(torchEnabled));
         }
 
         async function startCamera() {
@@ -629,12 +658,14 @@
             try {
                 await track.applyConstraints({ advanced: [{ torch: true }] });
                 torchEnabled = true;
+                refreshTorchButton();
                 const message = 'Cahaya kurang. Senter kamera dinyalakan otomatis.';
                 setStatus(message);
                 speakGuidance(message);
             } catch (error) {
                 // Sebagian perangkat melaporkan kemampuan torch, tetapi membatasinya pada mode tertentu.
                 torchAvailable = false;
+                refreshTorchButton();
                 console.info('Senter kamera tidak dapat dinyalakan otomatis.', error);
             }
         }
@@ -664,11 +695,37 @@
 
             torchAvailable = capabilities.torch === true;
             torchEnabled = false;
+            refreshTorchButton();
 
             if (!torchAvailable) return;
 
             window.setTimeout(checkLightLevel, 700);
             lightTimer = window.setInterval(checkLightLevel, 1500);
+        }
+
+        async function toggleTorch() {
+            const track = getVideoTrack();
+            if (!track || !torchAvailable) {
+                const message = 'Senter tidak tersedia pada kamera ini.';
+                setStatus(message, 'error');
+                speakGuidance(message);
+                return;
+            }
+
+            try {
+                const shouldEnable = !torchEnabled;
+                await track.applyConstraints({ advanced: [{ torch: shouldEnable }] });
+                torchEnabled = shouldEnable;
+                refreshTorchButton();
+                const message = shouldEnable ? 'Senter kamera dinyalakan.' : 'Senter kamera dimatikan.';
+                setStatus(message);
+                speakGuidance(message);
+            } catch (error) {
+                console.info('Senter kamera tidak dapat diubah.', error);
+                const message = 'Senter kamera tidak dapat diubah pada perangkat ini.';
+                setStatus(message, 'error');
+                speakGuidance(message);
+            }
         }
 
         function stopLightMonitor() {
@@ -680,6 +737,7 @@
             torchAvailable = false;
             torchEnabled = false;
             isMeasuringLight = false;
+            refreshTorchButton();
         }
 
         function captureFrame() {
@@ -1458,7 +1516,7 @@
 
             initialGuidancePlayed = true;
             await waitForIndonesianVoice();
-            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman mengambil foto resolusi penuh untuk hasil terbaik. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
+            const guidance = 'Selamat datang di Bacara. Jika tersedia, gunakan headset agar suara lebih jelas. Bersihkan lensa kamera, letakkan satu halaman buku di dalam bingkai, lalu arahkan kamera lurus ke halaman dan tahan perangkat dengan stabil. Bacara memindai otomatis ketika gambar sudah stabil dan tajam. Tombol Pindai halaman mengambil foto resolusi penuh untuk hasil terbaik. Jika kamera mendukungnya, tombol Senter tetap berada di kiri atas. Ketuk sekali sebuah tombol untuk mendengar fungsinya. Ketuk cepat dua kali untuk menjalankannya. Tombol Tahan teks ada di kanan atas untuk menjaga hasil agar tidak berubah.';
             setStatus('Panduan penggunaan sedang dibacakan.');
             speakMessage(guidance);
         }
@@ -1496,6 +1554,13 @@
                 ? 'Tombol Lanjutkan teks. Ketuk cepat dua kali agar hasil dipindai kembali ketika kamera stabil.'
                 : 'Tombol Tahan teks. Ketuk cepat dua kali agar hasil teks tidak berubah.',
             toggleTextHold
+        );
+        attachDoubleActivation(
+            torchToggleButton,
+            () => torchEnabled
+                ? 'Tombol Matikan senter. Ketuk cepat dua kali untuk mematikan senter kamera.'
+                : 'Tombol Nyalakan senter. Ketuk cepat dua kali untuk menyalakan senter kamera.',
+            toggleTorch
         );
 
         rate.addEventListener('input', () => {
