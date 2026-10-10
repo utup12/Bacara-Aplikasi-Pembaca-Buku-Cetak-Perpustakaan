@@ -1,8 +1,10 @@
+
 name: Tests
 
 on:
   push:
     branches:
+      - main
       - master
       - '*.x'
   pull_request:
@@ -47,3 +49,4 @@ jobs:
 
       - name: Execute tests
         run: php artisan test
+
