@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="id">
 <head>
     <meta charset="utf-8">
@@ -385,8 +385,13 @@
 
         const DARKNESS_THRESHOLD = 58;
         const REALTIME_SCAN_DELAY = 300;
-        const MINIMUM_OCR_CONFIDENCE = 48;
-        const MINIMUM_WORD_CONFIDENCE = 42;
+        // Tesseract sering memberi confidence rendah untuk cetakan buku yang
+        // kecil atau sedikit miring. Jangan membuang teks yang tetap berguna
+        // hanya karena nilainya belum mendekati hasil dokumen digital.
+        const MINIMUM_OCR_CONFIDENCE = 26;
+        const MINIMUM_WORD_CONFIDENCE = 22;
+        const MINIMUM_TEXT_LENGTH = 6;
+        const MINIMUM_LETTER_COUNT = 4;
         const VIDEO_OCR_TARGET_WIDTH = 2048;
         const PHOTO_OCR_TARGET_WIDTH = 2560;
         const REQUIRED_STEADY_FRAME_SAMPLES = 3;
@@ -1007,13 +1012,15 @@
         }
 
         function isUsefulOcrCandidate(candidate) {
-            if (candidate.text.length < 12 || candidate.letters < 8 || candidate.words < 2) {
+            if (candidate.text.length < MINIMUM_TEXT_LENGTH
+                || candidate.letters < MINIMUM_LETTER_COUNT
+                || candidate.words < 1) {
                 return false;
             }
 
             return candidate.confidence >= MINIMUM_OCR_CONFIDENCE
                 && candidate.wordConfidence >= MINIMUM_WORD_CONFIDENCE
-                && candidate.letterRatio >= 0.5;
+                && candidate.letterRatio >= 0.35;
         }
 
         async function recognizeBookPage(ocrWorker, frame, { thorough = false } = {}) {
@@ -1291,26 +1298,40 @@
                 return;
             }
 
-            if (await scanWithAndroidOcr()) return;
+            // Jangan melakukan await sebelum membuka input file pada web biasa.
+            // Browser Android dapat mencabut user activation setelah await, lalu
+            // photoCaptureInput.click() tidak lagi diizinkan membuka kamera.
+            const androidOcr = getAndroidOcrPlugin();
+            if (androidOcr) {
+                await scanWithAndroidOcr(androidOcr);
+                return;
+            }
 
             resetFrameStability();
             lastAutoScanAt = Date.now();
 
-            if ('ImageCapture' in window) {
-                setStatus('Mengambil foto resolusi penuh untuk hasil teks terbaik.');
-                const photoFrame = await takeHighResolutionPhoto();
-
-                if (photoFrame) {
-                    setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
-                    await scanPage({ force: true, preparedFrame: photoFrame, thorough: true });
-                    return;
-                }
+            if (!('ImageCapture' in window)) {
+                // Dipanggil langsung dari ketukan kedua agar browser tetap
+                // menganggapnya sebagai aksi pengguna dan membuka kamera.
+                photoCaptureInput.value = '';
+                photoCaptureInput.click();
+                return;
             }
 
-            // Fallback Android: kamera bawaan sistem umumnya menghasilkan foto lebih tajam
-            // daripada frame video yang tersedia untuk browser.
-            photoCaptureInput.value = '';
-            photoCaptureInput.click();
+            setStatus('Mengambil foto resolusi penuh untuk hasil teks terbaik.');
+            const photoFrame = await takeHighResolutionPhoto();
+
+            if (photoFrame) {
+                setStatus('Memproses foto resolusi penuh untuk hasil teks terbaik.');
+                await scanPage({ force: true, preparedFrame: photoFrame, thorough: true });
+                return;
+            }
+
+            // Jangan kembali ke input file di sini: operasi asinkron di atas
+            // sudah dapat membuat browser menolak pembukaan kamera. Gunakan
+            // frame video yang aktif sebagai fallback yang selalu tersedia.
+            setStatus('Foto resolusi penuh tidak tersedia. Memproses frame kamera.');
+            await scanPage({ force: true, thorough: true });
         }
 
         function getAndroidOcrPlugin() {
@@ -1319,8 +1340,7 @@
             return window.Capacitor.Plugins?.BacaraOcr ?? null;
         }
 
-        async function scanWithAndroidOcr() {
-            const androidOcr = getAndroidOcrPlugin();
+        async function scanWithAndroidOcr(androidOcr = getAndroidOcrPlugin()) {
             if (!androidOcr) return false;
 
             const cameraWasActive = stream !== null;
@@ -1473,3 +1493,4 @@
     </script>
 </body>
 </html>
+
