@@ -190,10 +190,9 @@
         }
 
         .torch-button {
-            position: fixed;
-            z-index: 30;
-            top: max(12px, env(safe-area-inset-top));
-            left: 12px;
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 10px);
             min-height: 48px;
             padding-inline: 16px;
             background: var(--putih);
@@ -218,17 +217,21 @@
             border: 0;
         }
 
-        .speak-dock {
+        .speak-dock-wrap {
             position: fixed;
-            z-index: 20;
+            z-index: 30;
             left: 50%;
             bottom: max(16px, env(safe-area-inset-bottom));
             transform: translateX(-50%);
+            width: min(calc(100% - 28px), 640px);
+        }
+
+        .speak-dock {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 10px;
-            width: min(calc(100% - 28px), 640px);
+            width: 100%;
         }
 
         .speak-dock button {
@@ -280,7 +283,7 @@
             }
             .panel { padding: 16px; }
             main { padding: 10px 14px 40px; }
-            .speak-dock {
+            .speak-dock-wrap {
                 gap: 6px;
                 width: calc(100% - 20px);
             }
@@ -300,8 +303,6 @@
 </head>
 <body>
     <a class="skip-link" href="#hasil-teks">Langsung ke hasil teks</a>
-    <button class="torch-button" id="torch-toggle" type="button" aria-pressed="false" hidden>Nyalakan senter</button>
-
     <main>
         <h1 class="sr-only">Bacara, pembaca buku melalui kamera</h1>
         <p id="status" role="status" aria-live="polite" aria-atomic="true" data-mode="info">Panduan suara sedang disiapkan.</p>
@@ -333,12 +334,15 @@
     <canvas id="canvas" hidden></canvas>
     <input id="photo-capture" type="file" accept="image/*" capture="environment" hidden>
 
-    <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
-        <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
-        <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
-        <button id="scan-now" type="button">Pindai halaman</button>
-        <button id="hentikan-suara" type="button">Hentikan suara</button>
-        <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
+    <div class="speak-dock-wrap">
+        <button class="torch-button" id="torch-toggle" type="button" aria-pressed="false" hidden>Nyalakan senter</button>
+        <div class="speak-dock" role="group" aria-label="Kontrol kamera dan pembacaan teks">
+            <button class="primary" id="baca" type="button" aria-describedby="bantuan-baca">Bacakan teks</button>
+            <button id="camera-toggle" type="button" aria-pressed="false">Aktifkan kamera</button>
+            <button id="scan-now" type="button">Pindai halaman</button>
+            <button id="hentikan-suara" type="button">Hentikan suara</button>
+            <button id="refresh-text" type="button" aria-label="Refresh hasil teks">Refresh</button>
+        </div>
     </div>
     <p class="sr-only" id="bantuan-baca">Ketuk sekali untuk mendengar fungsi tombol. Ketuk dua kali dengan cepat untuk menjalankannya.</p>
 
